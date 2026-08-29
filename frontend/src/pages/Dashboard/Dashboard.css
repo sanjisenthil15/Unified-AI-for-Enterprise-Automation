@@ -1,0 +1,237 @@
+/* ================================================================
+   Dashboard Page Styles
+   Top navbar + 3-column module card grid
+   ================================================================ */
+
+/* ── Page shell ─────────────────────────────────────────────────── */
+.dashboard-page {
+  min-height: 100vh;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Top navigation bar ─────────────────────────────────────────── */
+.dashboard-navbar {
+  height: 64px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2rem;
+  box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.navbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.navbar-logo {
+  font-size: 1.5rem;
+}
+
+.navbar-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+
+.navbar-title span {
+  color: var(--primary);
+}
+
+.navbar-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.navbar-badge {
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(37,99,235,.2);
+}
+
+.navbar-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+/* ── Main content area ──────────────────────────────────────────── */
+.dashboard-main {
+  flex: 1;
+  padding: 2.5rem 2.5rem 3rem;
+  max-width: 1300px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ── Section header ─────────────────────────────────────────────── */
+.dashboard-header {
+  margin-bottom: 2.25rem;
+}
+
+.dashboard-header h1 {
+  font-size: 1.65rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.35rem;
+}
+
+.dashboard-header p {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
+/* ── Module cards grid ──────────────────────────────────────────── */
+.modules-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+}
+
+/* ── Individual module card ─────────────────────────────────────── */
+.module-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1.75rem 1.5rem;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Coloured top accent bar */
+.module-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--card-accent, var(--primary));
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.module-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+  border-color: transparent;
+}
+
+/* ── Card icon area ─────────────────────────────────────────────── */
+.card-icon-wrap {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  background: var(--card-bg-light, var(--primary-light));
+  flex-shrink: 0;
+}
+
+/* ── Card body ──────────────────────────────────────────────────── */
+.card-body {
+  flex: 1;
+}
+
+.card-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.45rem;
+}
+
+.card-description {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+/* ── Card footer ─────────────────────────────────────────────────── */
+.card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.card-status {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+}
+
+.card-status.active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.card-arrow {
+  font-size: 1rem;
+  color: var(--text-muted);
+  transition: transform 0.2s, color 0.2s;
+}
+
+.module-card:hover .card-arrow {
+  transform: translateX(4px);
+  color: var(--primary);
+}
+
+/* ── Per-card accent colours via CSS custom properties ─────────── */
+.card-recruitment   { --card-accent: #2563eb; --card-bg-light: #eff6ff; }
+.card-support       { --card-accent: #7c3aed; --card-bg-light: #f5f3ff; }
+.card-incident      { --card-accent: #dc2626; --card-bg-light: #fef2f2; }
+.card-meeting       { --card-accent: #0891b2; --card-bg-light: #ecfeff; }
+.card-analytics     { --card-accent: #d97706; --card-bg-light: #fffbeb; }
+.card-employee      { --card-accent: #16a34a; --card-bg-light: #f0fdf4; }
+
+/* ── Responsive: 2 cols on tablet, 1 col on mobile ─────────────── */
+@media (max-width: 1024px) {
+  .modules-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .dashboard-main {
+    padding: 1.5rem 1rem 2rem;
+  }
+  .modules-grid {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-navbar {
+    padding: 0 1rem;
+  }
+}

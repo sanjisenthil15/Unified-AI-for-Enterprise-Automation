@@ -1,0 +1,191 @@
+/* ================================================================
+   HRDashboard.css
+   Reuses existing CSS variables from App.css.
+   Only adds styles that don't exist in Recruitment.css.
+   ================================================================ */
+
+.hr-dashboard { max-width: 1100px; }
+
+/* Welcome banner */
+.hr-welcome {
+  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  border-radius: var(--radius);
+  padding: 1.5rem 2rem;
+  color: #fff;
+  margin-bottom: 2rem;
+}
+.hr-welcome h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 0.25rem; }
+.hr-welcome p  { font-size: 0.92rem; opacity: 0.88; }
+
+/* Section title */
+.section-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Form grid */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem 1.5rem;
+}
+.form-grid .full-width { grid-column: 1 / -1; }
+
+.field-group { display: flex; flex-direction: column; gap: 0.35rem; }
+.field-group label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.field-input,
+.field-select {
+  padding: 0.65rem 0.85rem;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-family: var(--font);
+  color: var(--text-primary);
+  background: #f8fafc;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.field-input:focus,
+.field-select:focus {
+  border-color: var(--primary);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(37,99,235,.1);
+}
+
+/* Buttons */
+.btn-primary {
+  padding: 0.7rem 1.5rem;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.15s;
+}
+.btn-primary:hover   { opacity: 0.9; transform: translateY(-1px); }
+.btn-primary:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+.btn-secondary {
+  padding: 0.65rem 1.2rem;
+  background: var(--primary-light);
+  color: var(--primary);
+  border: 1px solid rgba(37,99,235,.25);
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-secondary:hover { background: #dbeafe; }
+
+/* Upload area */
+.upload-area {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 1.75rem;
+  text-align: center;
+  background: #f8fafc;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.upload-area:hover { border-color: var(--primary); background: var(--primary-light); }
+.upload-area input[type="file"] { display: none; }
+.upload-area .upload-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+.upload-area p { font-size: 0.9rem; color: var(--text-secondary); margin: 0; }
+
+.file-list { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.file-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+.file-chip span { color: var(--primary); font-size: 1rem; }
+
+/* Upload form row */
+.upload-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+
+/* Job selector */
+.job-selector {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+.job-selector label { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); white-space: nowrap; }
+
+/* Alert */
+.alert {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  margin-bottom: 1rem;
+}
+.alert.success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+.alert.error   { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+.alert.info    { background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
+
+/* Candidate detail panel */
+.detail-panel {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
+  margin-top: 1.5rem;
+}
+.detail-panel h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 1rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.detail-text {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  max-height: 300px;
+  overflow-y: auto;
+  background: #f8fafc;
+  border-radius: 6px;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  font-family: var(--font);
+}
+
+@media (max-width: 700px) {
+  .form-grid      { grid-template-columns: 1fr; }
+  .upload-meta    { grid-template-columns: 1fr; }
+}

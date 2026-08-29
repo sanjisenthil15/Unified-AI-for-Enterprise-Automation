@@ -1,0 +1,66 @@
+# ── Python ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# ── Environment / Secrets ────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Database ─────────────────────────────────────────────────────────
+*.db
+*.sqlite3
+
+# ── Uploads ──────────────────────────────────────────────────────────
+backend/uploads/
+
+# ── Node / React ─────────────────────────────────────────────────────
+node_modules/
+frontend/build/
+frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp/
+.pnp.js
+
+# ── IDE / Editor ─────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ── OS ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Logs ─────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Coverage / Testing ───────────────────────────────────────────────
+.coverage
+htmlcov/
+.pytest_cache/
+coverage.xml
+
+# ── Kiro internal ────────────────────────────────────────────────────
+.kiro/

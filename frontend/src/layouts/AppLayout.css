@@ -1,0 +1,225 @@
+/* ================================================================
+   AppLayout — sidebar + topbar shell used by all authenticated pages
+   ================================================================ */
+
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+/* ── Sidebar ────────────────────────────────────────────────────── */
+.sidebar {
+  width: 240px;
+  min-height: 100vh;
+  background: #0f172a;          /* deep navy */
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 200;
+  box-shadow: 2px 0 16px rgba(0,0,0,.18);
+}
+
+.sidebar-brand {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0 1.35rem;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  flex-shrink: 0;
+}
+
+.sidebar-brand-icon {
+  font-size: 1.4rem;
+}
+
+.sidebar-brand-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.2px;
+  line-height: 1.2;
+}
+
+.sidebar-brand-name span {
+  color: #60a5fa;   /* blue-400 */
+}
+
+/* ── Navigation links ───────────────────────────────────────────── */
+.sidebar-nav {
+  flex: 1;
+  padding: 1rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  overflow-y: auto;
+}
+
+.sidebar-section-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #475569;
+  padding: 0.75rem 0.75rem 0.3rem;
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  text-decoration: none;
+  color: #94a3b8;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font);
+}
+
+.sidebar-link:hover {
+  background: rgba(255,255,255,.06);
+  color: #e2e8f0;
+}
+
+.sidebar-link.active {
+  background: rgba(96,165,250,.15);
+  color: #60a5fa;
+}
+
+.sidebar-link.active .sidebar-link-icon {
+  filter: none;
+}
+
+.sidebar-link-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  width: 22px;
+  text-align: center;
+}
+
+/* ── Logout button at bottom ────────────────────────────────────── */
+.sidebar-footer {
+  padding: 0.75rem 0.65rem 1.25rem;
+  border-top: 1px solid rgba(255,255,255,.07);
+}
+
+.sidebar-logout {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  color: #f87171;
+  font-size: 0.9rem;
+  font-weight: 500;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font);
+  transition: background 0.15s;
+}
+
+.sidebar-logout:hover {
+  background: rgba(248,113,113,.12);
+}
+
+/* ── Page body (offset for fixed sidebar) ───────────────────────── */
+.layout-body {
+  margin-left: 240px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ── Top bar ────────────────────────────────────────────────────── */
+.layout-topbar {
+  height: 64px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2rem;
+  box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  flex-shrink: 0;
+}
+
+.topbar-page-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.topbar-badge {
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(37,99,235,.2);
+}
+
+.topbar-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: #fff;
+  font-size: 0.88rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ── Content area ───────────────────────────────────────────────── */
+.layout-content {
+  flex: 1;
+  padding: 2.25rem 2.5rem 3rem;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .sidebar {
+    width: 200px;
+  }
+  .layout-body {
+    margin-left: 200px;
+  }
+  .layout-content {
+    padding: 1.5rem 1rem 2rem;
+  }
+}
+
+@media (max-width: 560px) {
+  .sidebar {
+    display: none;          /* hide sidebar; a hamburger menu can be added later */
+  }
+  .layout-body {
+    margin-left: 0;
+  }
+}

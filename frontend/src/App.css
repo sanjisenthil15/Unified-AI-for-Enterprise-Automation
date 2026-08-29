@@ -1,0 +1,42 @@
+/* Global resets and CSS custom properties for the entire application */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  /* Brand palette */
+  --primary:        #2563eb;
+  --primary-dark:   #1d4ed8;
+  --primary-light:  #eff6ff;
+  --accent:         #7c3aed;
+  --success:        #16a34a;
+  --warning:        #d97706;
+  --danger:         #dc2626;
+  --info:           #0891b2;
+
+  /* Neutrals */
+  --bg:             #f0f4f8;
+  --surface:        #ffffff;
+  --border:         #e2e8f0;
+  --text-primary:   #1e293b;
+  --text-secondary: #64748b;
+  --text-muted:     #94a3b8;
+
+  /* Typography */
+  --font:           'Segoe UI', system-ui, -apple-system, sans-serif;
+  --radius:         12px;
+  --shadow-sm:      0 1px 3px rgba(0,0,0,.08);
+  --shadow-md:      0 4px 16px rgba(0,0,0,.10);
+  --shadow-lg:      0 8px 32px rgba(0,0,0,.14);
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: var(--font);
+  color: var(--text-primary);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
