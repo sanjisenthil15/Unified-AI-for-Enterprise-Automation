@@ -91,6 +91,31 @@ def get_job_posting(db: Session, job_id: int) -> JobPosting:
     return job
 
 
+def update_job_posting(db: Session, job_id: int, payload) -> JobPosting:
+    """Update an existing job posting's editable fields."""
+    job = get_job_posting(db, job_id)
+    if payload.title is not None:
+        job.title = payload.title
+    if payload.description is not None:
+        job.description = payload.description
+    if payload.required_skills is not None:
+        job.required_skills = payload.required_skills
+    if payload.min_education is not None:
+        job.min_education = payload.min_education
+    if payload.experience_level is not None:
+        job.experience_level = payload.experience_level
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def delete_job_posting(db: Session, job_id: int) -> None:
+    """Soft-close a job posting (set status=closed). Does not delete resumes."""
+    job = get_job_posting(db, job_id)
+    job.status = "closed"
+    db.commit()
+
+
 # ------------------------------------------------------------------ #
 # Resume upload + text extraction
 # ------------------------------------------------------------------ #
@@ -130,6 +155,270 @@ def save_and_extract_resume(
     db.commit()
     db.refresh(resume)
     return resume
+
+
+# ------------------------------------------------------------------ #
+# Auto-extract candidate name + email from raw PDF text
+# ------------------------------------------------------------------ #
+
+def _auto_extract_candidate_info(text: str) -> dict:
+    """
+    Best-effort extraction of candidate name and email from resume text.
+    Returns {"name": str|None, "email": str|None}.
+    Does NOT invent information — returns None when not found.
+
+    Strategy:
+      - Email: scan the top 30 lines for a valid email pattern, prefer
+        the first found in the header. Fall back to first valid email
+        anywhere in the document.
+      - Name: scan the top 20 lines only. Strict filters reject section
+        headings, skill lists, school/institution names, URLs, and lines
+        containing digits or disqualifying punctuation.
+    """
+    EMAIL_RE = re.compile(
+        r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"
+    )
+    JUNK_EMAIL_RE = re.compile(
+        r"(noreply|no-reply|example|support@|info@|admin@|donotreply)",
+        re.IGNORECASE,
+    )
+
+    # Words whose presence disqualifies a line from being a name
+    REJECT_WORDS = {
+        # resume section headings
+        "curriculum", "vitae", "resume", "cv", "profile", "contact",
+        "summary", "objective", "education", "experience", "skills",
+        "technical", "projects", "certifications", "references",
+        "address", "phone", "email", "linkedin", "github", "mobile",
+        "tel", "fax", "website", "portfolio", "achievements",
+        "internship", "work", "professional", "declaration", "date",
+        "place", "nationality", "hobbies", "interests", "languages",
+        # institution / school words
+        "school", "college", "university", "institute", "institution",
+        "matric", "higher", "secondary", "academy", "polytechnic",
+        "engineering", "technology", "science", "arts", "commerce",
+        "management", "studies", "department", "faculty",
+        # tech / programming terms
+        "python", "java", "javascript", "typescript", "html", "css",
+        "sql", "react", "node", "angular", "vue", "django", "flask",
+        "fastapi", "spring", "docker", "git", "linux", "aws", "azure",
+        "gcp", "mysql", "mongodb", "redis", "kotlin", "swift",
+        "flutter", "dart", "rust", "golang", "scala", "matlab",
+        "tableau", "powerbi", "excel", "hadoop", "spark",
+    }
+
+    # Characters that signal this is NOT a name line
+    PUNCT_REJECT = set(':,/|@#•→►▸–—*[](){}<>_~`')
+
+    lines = text.splitlines()
+    header_lines = [l.strip() for l in lines[:30] if l.strip()]
+
+    # ── Email ────────────────────────────────────────────────────────
+    email = None
+    for line in header_lines:
+        m = EMAIL_RE.search(line)
+        if m and not JUNK_EMAIL_RE.search(m.group(0)):
+            email = m.group(0).strip()
+            break
+    if not email:
+        for m in EMAIL_RE.finditer(text):
+            addr = m.group(0).strip()
+            if not JUNK_EMAIL_RE.search(addr):
+                email = addr
+                break
+
+    # ── Name ─────────────────────────────────────────────────────────
+    name = None
+
+    def _normalize_dotted(line: str) -> str:
+        """
+        Turn dotted-initial tokens like 'SNEHA.T.D' into 'SNEHA T D'
+        so they can be tokenized as separate words.
+        """
+        # Replace a dot between a letter and another letter with a space
+        return re.sub(r'(?<=[A-Za-z])\.(?=[A-Za-z])', ' ', line)
+
+    for raw_line in header_lines[:20]:
+        line = _normalize_dotted(raw_line).strip()
+
+        if EMAIL_RE.search(line):
+            continue
+        if re.search(r'\d', line):
+            continue
+        if any(ch in PUNCT_REJECT for ch in line):
+            continue
+        if re.search(r'https?://|www\.|linkedin\.com|github\.com', line, re.IGNORECASE):
+            continue
+        if len(line) < 3 or len(line) > 55:
+            continue
+
+        words = line.split()
+        if not (2 <= len(words) <= 5):
+            continue
+
+        # Every word must start with a letter
+        if not all(w[0].isalpha() for w in words):
+            continue
+
+        # Each word must be purely alphabetic (allows single initials like "R")
+        if not all(re.match(r'^[A-Za-z]+$', w) for w in words):
+            continue
+
+        # Reject if any word is in the reject list
+        if any(w.lower() in REJECT_WORDS for w in words):
+            continue
+
+        # Must have at least one word with 3+ letters (not just initials)
+        long_words = [w for w in words if len(w) >= 3]
+        if not long_words:
+            continue
+
+        # At least one long word must look like a proper noun
+        # (title-case, all-caps, or mixed-case starting with uppercase)
+        proper = [
+            w for w in long_words
+            if w[0].isupper()
+        ]
+        if not proper:
+            continue
+
+        name = " ".join(words)
+        break
+
+    return {"name": name, "email": email}
+
+
+# ------------------------------------------------------------------ #
+# Bulk upload — process multiple files, one failure won't stop others
+# ------------------------------------------------------------------ #
+
+def bulk_upload_resumes(
+    db: Session,
+    job_id: int,
+    files: list,          # list of UploadFile
+) -> list:
+    """
+    Process multiple PDF uploads for a single job.
+    Auto-extracts candidate name + email from each PDF.
+    Returns list of dicts with result per file.
+    """
+    get_job_posting(db, job_id)   # raise 404 early if job missing
+    results = []
+    for upload_file in files:
+        entry = {"file_name": upload_file.filename, "status": "ok", "resume_id": None,
+                 "candidate_name": None, "candidate_email": None, "error": None,
+                 "extraction_status": None}
+        try:
+            if not upload_file.filename.lower().endswith(".pdf"):
+                entry["status"] = "error"
+                entry["error"] = "Not a PDF file"
+                results.append(entry)
+                continue
+
+            # Duplicate check — same filename already uploaded for this job
+            existing = (
+                db.query(Resume)
+                .filter(Resume.job_posting_id == job_id, Resume.file_name == upload_file.filename)
+                .first()
+            )
+            if existing:
+                entry["status"] = "duplicate"
+                entry["error"] = f"File '{upload_file.filename}' already uploaded for this job."
+                entry["resume_id"] = existing.id
+                results.append(entry)
+                continue
+
+            file_bytes = upload_file.file.read()
+            unique_name = f"{uuid.uuid4().hex}_{upload_file.filename}"
+            file_path = UPLOAD_DIR / unique_name
+            with open(file_path, "wb") as f:
+                f.write(file_bytes)
+
+            extracted = extract_text_from_pdf(file_bytes)
+            extraction_status = "extracted" if extracted.strip() else "error"
+
+            # Auto-detect name + email
+            info = _auto_extract_candidate_info(extracted) if extracted.strip() else {"name": None, "email": None}
+            candidate_name  = info["name"]  or "Not detected"
+            candidate_email = info["email"]
+
+            resume = Resume(
+                job_posting_id  = job_id,
+                candidate_name  = candidate_name,
+                candidate_email = candidate_email,
+                file_name       = upload_file.filename,
+                file_path       = str(file_path),
+                extracted_text  = extracted,
+                status          = extraction_status,
+            )
+            db.add(resume)
+            db.commit()
+            db.refresh(resume)
+
+            entry["resume_id"]        = resume.id
+            entry["candidate_name"]   = candidate_name
+            entry["candidate_email"]  = candidate_email
+            entry["extraction_status"] = extraction_status
+        except Exception as exc:
+            entry["status"] = "error"
+            entry["error"]  = str(exc)
+        results.append(entry)
+    return results
+
+
+# ------------------------------------------------------------------ #
+# Edit resume candidate info
+# ------------------------------------------------------------------ #
+
+def update_resume_info(db: Session, resume_id: int, payload) -> Resume:
+    """Allow HR to correct auto-extracted candidate name / email."""
+    resume = get_resume(db, resume_id)
+    if payload.candidate_name is not None:
+        resume.candidate_name = payload.candidate_name
+    if payload.candidate_email is not None:
+        resume.candidate_email = payload.candidate_email
+    db.commit()
+    db.refresh(resume)
+    return resume
+
+
+# ------------------------------------------------------------------ #
+# Delete resume
+# ------------------------------------------------------------------ #
+
+def delete_resume(db: Session, resume_id: int) -> None:
+    """Delete a resume record and its file from disk."""
+    resume = get_resume(db, resume_id)
+    # Remove file from disk if it exists
+    try:
+        p = Path(resume.file_path)
+        if p.exists():
+            p.unlink()
+    except Exception as exc:
+        print(f"[RecruitmentService] Could not delete file {resume.file_path}: {exc}")
+    db.delete(resume)
+    db.commit()
+
+
+# ------------------------------------------------------------------ #
+# Recruitment statistics
+# ------------------------------------------------------------------ #
+
+def get_recruitment_stats(db: Session) -> dict:
+    """Return real counts from the database for the stats banner."""
+    from sqlalchemy import func as sqlfunc
+    open_positions = db.query(JobPosting).filter(JobPosting.status == "active").count()
+    total_resumes  = db.query(Resume).count()
+    waiting        = db.query(Resume).filter(Resume.status == "extracted").count()
+    shortlisted    = db.query(Resume).filter(Resume.recommendation == "selected").count()
+    rejected       = db.query(Resume).filter(Resume.recommendation == "rejected").count()
+    return {
+        "open_positions": open_positions,
+        "applications":   total_resumes,
+        "waiting":        waiting,
+        "shortlisted":    shortlisted,
+        "rejected":       rejected,
+    }
 
 
 def list_resumes_for_job(db: Session, job_id: int):

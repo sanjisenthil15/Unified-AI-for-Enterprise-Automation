@@ -22,6 +22,14 @@ class JobPostingCreate(BaseModel):
     experience_level: str = Field(default="mid", pattern="^(entry|junior|mid|senior|lead)$")
 
 
+class JobPostingUpdate(BaseModel):
+    title:            Optional[str] = Field(None, min_length=3, max_length=150)
+    description:      Optional[str] = None
+    required_skills:  Optional[str] = None
+    min_education:    Optional[str] = None
+    experience_level: Optional[str] = Field(None, pattern="^(entry|junior|mid|senior|lead)$")
+
+
 class JobPostingResponse(BaseModel):
     id:               int
     title:            str
@@ -63,6 +71,7 @@ class ResumeListItem(BaseModel):
     """Lightweight resume entry used in list/results table."""
     id:             int
     candidate_name: str
+    candidate_email: Optional[str] = None
     file_name:      str
     status:         str
     ai_score:       Optional[float] = None
@@ -73,6 +82,39 @@ class ResumeListItem(BaseModel):
     created_at:     datetime
 
     model_config = {"from_attributes": True}
+
+
+class ResumeUpdate(BaseModel):
+    """Allow HR to correct auto-extracted candidate info only."""
+    candidate_name:  Optional[str] = Field(None, min_length=1, max_length=120)
+    candidate_email: Optional[str] = Field(None, max_length=255)
+
+
+class BulkUploadFileResult(BaseModel):
+    file_name:        str
+    status:           str           # ok | error | duplicate
+    resume_id:        Optional[int] = None
+    candidate_name:   Optional[str] = None
+    candidate_email:  Optional[str] = None
+    extraction_status: Optional[str] = None
+    error:            Optional[str] = None
+
+
+class BulkUploadResponse(BaseModel):
+    job_id:    int
+    total:     int
+    succeeded: int
+    failed:    int
+    duplicates: int
+    files:     List[BulkUploadFileResult]
+
+
+class RecruitmentStats(BaseModel):
+    open_positions: int
+    applications:   int
+    waiting:        int
+    shortlisted:    int
+    rejected:       int
 
 
 # ------------------------------------------------------------------ #

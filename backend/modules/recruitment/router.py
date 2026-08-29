@@ -7,10 +7,16 @@ Endpoints:
     POST   /recruitment/jobs                        — Create job posting (HR/admin)
     GET    /recruitment/jobs                        — List all job postings
     GET    /recruitment/jobs/{job_id}               — Get a single job posting
-    POST   /recruitment/jobs/{job_id}/resumes       — Upload PDF + extract text
+    PUT    /recruitment/jobs/{job_id}               — Update a job posting (HR/admin)
+    DELETE /recruitment/jobs/{job_id}               — Close/delete a job posting (HR/admin)
+    POST   /recruitment/jobs/{job_id}/resumes       — Upload PDF + extract text (single)
+    POST   /recruitment/jobs/{job_id}/resumes/bulk  — Bulk upload PDFs with auto-extraction
     GET    /recruitment/jobs/{job_id}/resumes       — List resumes for a job
     GET    /recruitment/resumes/{resume_id}         — Get single resume
+    PUT    /recruitment/resumes/{resume_id}         — Edit candidate name/email (HR/admin)
+    DELETE /recruitment/resumes/{resume_id}         — Delete a resume (HR/admin)
     POST   /recruitment/jobs/{job_id}/analyze       — Run Gemini AI on all resumes (Phase 2)
+    GET    /recruitment/stats                       — Real recruitment statistics
 """
 
 from typing import List, Optional
@@ -23,10 +29,14 @@ from models.user import User
 
 from modules.recruitment.schemas import (
     AnalysisResponse,
+    BulkUploadResponse,
     JobPostingCreate,
+    JobPostingUpdate,
     JobPostingResponse,
+    RecruitmentStats,
     ResumeListItem,
     ResumeResponse,
+    ResumeUpdate,
 )
 from modules.recruitment import service
 
@@ -67,6 +77,27 @@ def get_job(
     return service.get_job_posting(db, job_id)
 
 
+@router.put("/jobs/{job_id}", response_model=JobPostingResponse,
+            summary="Update a job posting (HR / Admin only)")
+def update_job(
+    job_id:       int,
+    payload:      JobPostingUpdate,
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(require_roles(["hr", "admin"])),
+):
+    return service.update_job_posting(db, job_id, payload)
+
+
+@router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT,
+               summary="Close a job posting (HR / Admin only)")
+def delete_job(
+    job_id:       int,
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(require_roles(["hr", "admin"])),
+):
+    service.delete_job_posting(db, job_id)
+
+
 # ------------------------------------------------------------------ #
 # Resume endpoints
 # ------------------------------------------------------------------ #
@@ -87,6 +118,29 @@ async def upload_resume(
         db=db, job_id=job_id,
         candidate_name=candidate_name, candidate_email=candidate_email,
         upload_file=resume_file,
+    )
+
+
+@router.post("/jobs/{job_id}/resumes/bulk", response_model=BulkUploadResponse,
+             status_code=status.HTTP_200_OK,
+             summary="Bulk upload PDFs with auto name+email extraction (HR / Admin only)")
+async def bulk_upload_resumes(
+    job_id:       int,
+    files:        List[UploadFile] = File(...),
+    db:           Session          = Depends(get_db),
+    current_user: User             = Depends(require_roles(["hr", "admin"])),
+):
+    results = service.bulk_upload_resumes(db, job_id, files)
+    succeeded  = sum(1 for r in results if r["status"] == "ok")
+    failed     = sum(1 for r in results if r["status"] == "error")
+    duplicates = sum(1 for r in results if r["status"] == "duplicate")
+    return BulkUploadResponse(
+        job_id=job_id,
+        total=len(results),
+        succeeded=succeeded,
+        failed=failed,
+        duplicates=duplicates,
+        files=results,
     )
 
 
@@ -111,6 +165,40 @@ def get_resume(
     return service.get_resume(db, resume_id)
 
 
+@router.put("/resumes/{resume_id}", response_model=ResumeResponse,
+            summary="Edit candidate name / email (HR / Admin only)")
+def update_resume(
+    resume_id:    int,
+    payload:      ResumeUpdate,
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(require_roles(["hr", "admin"])),
+):
+    return service.update_resume_info(db, resume_id, payload)
+
+
+@router.delete("/resumes/{resume_id}", status_code=status.HTTP_204_NO_CONTENT,
+               summary="Delete a resume and its file (HR / Admin only)")
+def delete_resume(
+    resume_id:    int,
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(require_roles(["hr", "admin"])),
+):
+    service.delete_resume(db, resume_id)
+
+
+# ------------------------------------------------------------------ #
+# Stats
+# ------------------------------------------------------------------ #
+
+@router.get("/stats", response_model=RecruitmentStats,
+            summary="Real recruitment statistics")
+def recruitment_stats(
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(get_current_user),
+):
+    return service.get_recruitment_stats(db)
+
+
 # ------------------------------------------------------------------ #
 # Phase 2 — Gemini AI analysis
 # ------------------------------------------------------------------ #
@@ -126,14 +214,6 @@ def analyze_resumes(
     db:           Session = Depends(get_db),
     current_user: User    = Depends(require_roles(["hr", "admin"])),
 ):
-    """
-    Analyses every resume with status='extracted' for the given job posting.
-    Sends extracted text + job requirements to Gemini, parses the structured
-    response, and saves results to the resumes table.
-
-    Returns the full updated resume list for the job so the frontend
-    can re-render the results table in one round-trip.
-    """
     results = service.analyze_job_resumes(db, job_id)
     analysed_count = sum(1 for r in results if r.status == "analysed")
     return AnalysisResponse(
