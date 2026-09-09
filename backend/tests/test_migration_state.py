@@ -7,6 +7,10 @@ from config.database import engine
 EXPECTED_TABLES = {
     "roles", "users", "employees", "job_postings", "resumes",
     "candidates", "support_tickets", "incidents", "alembic_version",
+    # Meeting Intelligence (Phase 2)
+    "meetings", "meeting_participants", "meeting_speakers",
+    "meeting_transcripts", "meeting_transcript_segments",
+    "meeting_analyses", "meeting_action_items",
 }
 EXPECTED_ROLES = {"admin", "hr_manager", "support_agent", "recruiter", "employee", "viewer"}
 
@@ -40,3 +44,13 @@ def test_updated_at_triggers_exist():
         ))}
     assert "trg_users_updated_at" in trigs
     assert "trg_resumes_updated_at" in trigs
+    assert "trg_meetings_updated_at" in trigs
+    assert "trg_meeting_action_items_updated_at" in trigs
+
+
+def test_meeting_video_not_stored_in_db():
+    """The meetings table stores a path reference, never the media blob."""
+    cols = {c["name"]: c for c in inspect(engine).get_columns("meetings")}
+    assert "source_video_path" in cols
+    assert str(cols["source_video_path"]["type"]).upper().startswith("VARCHAR")
+    assert not any(str(c["type"]).upper() in ("BYTEA", "BLOB", "OID") for c in cols.values())

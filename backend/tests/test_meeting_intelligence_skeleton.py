@@ -42,13 +42,12 @@ def test_config_defaults():
 
 
 def test_meeting_router_not_registered_in_app():
-    """Phase 1 must not expose any /meetings endpoint."""
+    """No /meetings endpoint until Phase 8."""
     from main import app
     paths = {r.path for r in app.routes}
     assert not any(p.startswith("/api/v1/meetings") for p in paths)
 
 
-def test_meeting_tables_not_registered():
-    """Phase 1 must not add Meeting Intelligence tables to the ORM metadata."""
-    from config.database import Base
-    assert "meetings" not in Base.metadata.tables
+def test_meeting_router_still_has_no_routes():
+    from modules.meeting_intelligence.router import router
+    assert router.routes == []
