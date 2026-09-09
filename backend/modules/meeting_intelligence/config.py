@@ -45,6 +45,9 @@ class MeetingSettings(BaseSettings):
     # --- speaker diarization (pluggable) -------------------------------- #
     diarization_backend: str = "resemblyzer"   # resemblyzer | pyannote | single
     diarization_max_speakers: int = 8
+    diarization_window_sec: float = 1.5
+    diarization_hop_sec: float = 0.75
+    diarization_distance_threshold: float = 0.35   # cosine; higher => fewer speakers
 
     # --- AI analysis (pluggable provider) ------------------------------ #
     ai_provider: str = "gemini"                # gemini | ollama

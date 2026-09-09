@@ -17,10 +17,18 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from models.meeting import Meeting
+from models.meeting_speaker import MeetingSpeaker
 from models.meeting_transcript import MeetingTranscript
 from models.meeting_transcript_segment import MeetingTranscriptSegment
 from modules.meeting_intelligence.config import meeting_settings
 from modules.meeting_intelligence.processing.audio import AudioExtractionError, extract_audio
+from modules.meeting_intelligence.processing.diarization import (
+    Diarizer,
+    DiarizationError,
+    SingleSpeakerDiarizer,
+    get_diarizer,
+)
+from modules.meeting_intelligence.processing.merge import label_for_span
 from modules.meeting_intelligence.processing.transcription import (
     TranscriptionError,
     TranscriptionResult,
@@ -191,6 +199,103 @@ def transcribe_meeting(
     db.commit()
     db.refresh(transcript)
     return transcript
+
+
+def diarize_meeting(
+    db: Session,
+    meeting_id: int,
+    *,
+    storage: MeetingVideoStorage | None = None,
+    diarizer: Diarizer | None = None,
+) -> list[MeetingSpeaker]:
+    """
+    Run speaker diarization on the meeting's audio, persist the detected
+    speakers in `meeting_speakers`, and attach speaker_id / speaker_label to
+    each transcript segment by time overlap.
+
+    Speaker labels are generic ("Speaker 1", ...). The rows keep
+    display_name / mapped_user_id / mapped_employee_id NULL so a real
+    identity can be attached later via the API — no schema change needed.
+
+    Graceful degradation (req 8): if the diarization backend fails or its
+    optional dependencies are missing, this falls back to a single
+    "Speaker 1" rather than raising. A genuinely missing/invalid audio file
+    still raises HTTP 422.
+
+    Re-running replaces the previous speakers and re-maps the segments.
+    Pipeline status transitions are not done here.
+    """
+    storage = storage or get_storage()
+    meeting = get_meeting(db, meeting_id)
+
+    if not meeting.audio_path:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "Meeting has no extracted audio. Run audio extraction first.")
+    try:
+        audio = storage.resolve(meeting.audio_path)
+    except StorageError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+    if not audio.is_file():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "Audio file is missing from storage.")
+
+    engine = diarizer or get_diarizer()
+    try:
+        result = engine.diarize(str(audio))
+    except DiarizationError:
+        try:
+            result = SingleSpeakerDiarizer().diarize(str(audio))
+        except DiarizationError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                f"Diarization failed: {exc}")
+
+    if not result.speaker_labels:
+        result = SingleSpeakerDiarizer().diarize(str(audio))
+
+    # Reprocess-safe: clear previous mapping + speakers.
+    db.query(MeetingTranscriptSegment).filter(
+        MeetingTranscriptSegment.meeting_id == meeting_id
+    ).update({"speaker_id": None, "speaker_label": None}, synchronize_session=False)
+    db.query(MeetingSpeaker).filter(
+        MeetingSpeaker.meeting_id == meeting_id
+    ).delete(synchronize_session=False)
+    db.flush()
+
+    speakers: dict[str, MeetingSpeaker] = {}
+    for label in result.speaker_labels:
+        row = MeetingSpeaker(meeting_id=meeting_id, label=label)
+        db.add(row)
+        speakers[label] = row
+    db.flush()
+
+    segments = (
+        db.query(MeetingTranscriptSegment)
+        .filter(MeetingTranscriptSegment.meeting_id == meeting_id)
+        .order_by(MeetingTranscriptSegment.seq)
+        .all()
+    )
+    default_label = result.speaker_labels[0]
+    seg_counts: dict[str, int] = {}
+    speaking_ms: dict[str, int] = {}
+    for seg in segments:
+        label = label_for_span(seg.start_ms, seg.end_ms, result.turns, default=default_label)
+        if label not in speakers:
+            label = default_label
+        seg.speaker_id = speakers[label].id
+        seg.speaker_label = label
+        seg_counts[label] = seg_counts.get(label, 0) + 1
+        speaking_ms[label] = speaking_ms.get(label, 0) + max(seg.end_ms - seg.start_ms, 0)
+
+    for label, row in speakers.items():
+        row.segment_count = seg_counts.get(label, 0)
+        secs = round(speaking_ms.get(label, 0) / 1000)
+        row.total_speaking_sec = secs or None
+
+    meeting.diarization_backend = result.backend
+    db.commit()
+    for row in speakers.values():
+        db.refresh(row)
+    return list(speakers.values())
 
 
 def extract_meeting_audio(
