@@ -3,10 +3,15 @@ models/meeting.py
 
 SQLAlchemy ORM model for the `meetings` table.
 Used by the Meeting Intelligence module.
+
+NOTE: This is the original single-table placeholder. It is intentionally
+NOT registered in models/__init__.py yet — the Meeting Intelligence module
+(feature/meeting-offline) will replace it with the full offline-processing
+schema (meetings, participants, speakers, transcripts, segments, analyses,
+action items) via its own Alembic migration.
 """
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Enum, Integer
-from sqlalchemy.dialects.mysql import BIGINT
+from sqlalchemy import Column, String, DateTime, ForeignKey, Enum, Integer, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -18,10 +23,10 @@ class Meeting(Base):
 
     __tablename__ = "meetings"
 
-    id = Column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     created_by = Column(
-        BIGINT(unsigned=True),
+        BigInteger,
         ForeignKey("users.id", onupdate="CASCADE", ondelete="RESTRICT"),
         nullable=False,
         index=True,
@@ -33,7 +38,8 @@ class Meeting(Base):
     audio_path   = Column(String(512),  nullable=True)
 
     status = Column(
-        Enum("pending", "transcribing", "summarizing", "completed", "failed"),
+        Enum("pending", "transcribing", "summarizing", "completed", "failed",
+             name="meeting_status"),
         nullable=False,
         default="pending",
         index=True,

@@ -7,9 +7,8 @@ Passwords are NEVER stored in plain text — only bcrypt hashes.
 """
 
 from sqlalchemy import (
-    Column, String, Boolean, DateTime, ForeignKey, Text
+    Column, String, Boolean, DateTime, ForeignKey, BigInteger, Integer
 )
-from sqlalchemy.dialects.mysql import BIGINT, TINYINT
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -31,7 +30,7 @@ class User(Base):
     # Primary key
     # ------------------------------------------------------------------ #
     id = Column(
-        BIGINT(unsigned=True),
+        BigInteger,
         primary_key=True,
         autoincrement=True,
     )
@@ -40,7 +39,7 @@ class User(Base):
     # Foreign key — Role (RBAC)
     # ------------------------------------------------------------------ #
     role_id = Column(
-        TINYINT(unsigned=True),
+        Integer,
         ForeignKey("roles.id", onupdate="CASCADE", ondelete="RESTRICT"),
         nullable=False,
         index=True,

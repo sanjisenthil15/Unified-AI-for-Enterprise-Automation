@@ -5,8 +5,7 @@ SQLAlchemy ORM model for the `job_postings` table.
 A job posting defines what HR is looking for; resumes are matched against it.
 """
 
-from sqlalchemy import Column, String, Text, DateTime, Enum, ForeignKey
-from sqlalchemy.dialects.mysql import BIGINT
+from sqlalchemy import Column, String, Text, DateTime, Enum, ForeignKey, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -21,11 +20,11 @@ class JobPosting(Base):
 
     __tablename__ = "job_postings"
 
-    id = Column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     # HR user who created this posting (FK → users.id)
     created_by = Column(
-        BIGINT(unsigned=True),
+        BigInteger,
         ForeignKey("users.id", onupdate="CASCADE", ondelete="RESTRICT"),
         nullable=False,
         index=True,
@@ -41,13 +40,14 @@ class JobPosting(Base):
         comment="Minimum education level required",
     )
     experience_level = Column(
-        Enum("entry", "junior", "mid", "senior", "lead"),
+        Enum("entry", "junior", "mid", "senior", "lead",
+             name="job_posting_experience_level"),
         nullable=False,
         default="mid",
         comment="Seniority level — entry/junior means fresher-friendly scoring applies",
     )
     status = Column(
-        Enum("draft", "active", "closed"),
+        Enum("draft", "active", "closed", name="job_posting_status"),
         nullable=False,
         default="active",
         index=True,

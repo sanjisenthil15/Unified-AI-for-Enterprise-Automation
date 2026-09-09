@@ -5,8 +5,7 @@ SQLAlchemy ORM model for the `support_tickets` table.
 Used by the Customer Support AI module.
 """
 
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Enum
-from sqlalchemy.dialects.mysql import BIGINT, SMALLINT
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Enum, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -18,16 +17,16 @@ class SupportTicket(Base):
 
     __tablename__ = "support_tickets"
 
-    id = Column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     submitted_by = Column(
-        BIGINT(unsigned=True),
+        BigInteger,
         ForeignKey("users.id", onupdate="CASCADE", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
     assigned_to = Column(
-        BIGINT(unsigned=True),
+        BigInteger,
         ForeignKey("users.id", onupdate="CASCADE", ondelete="SET NULL"),
         nullable=True,
         index=True,
@@ -37,19 +36,20 @@ class SupportTicket(Base):
     description = Column(Text,        nullable=False)
 
     priority = Column(
-        Enum("low", "medium", "high", "critical"),
+        Enum("low", "medium", "high", "critical", name="support_ticket_priority"),
         nullable=False,
         default="medium",
         index=True,
     )
     status = Column(
-        Enum("open", "in_progress", "resolved", "closed", "escalated"),
+        Enum("open", "in_progress", "resolved", "closed", "escalated",
+             name="support_ticket_status"),
         nullable=False,
         default="open",
         index=True,
     )
     channel = Column(
-        Enum("web", "email", "chat", "api"),
+        Enum("web", "email", "chat", "api", name="support_ticket_channel"),
         nullable=False,
         default="web",
     )

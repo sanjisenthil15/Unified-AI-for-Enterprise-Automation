@@ -8,7 +8,9 @@ Responsibilities:
   - Register all module routers under the /api/v1 prefix
   - Configure CORS middleware
   - Register global exception handlers
-  - Trigger database table creation on startup (development convenience)
+
+Database schema is managed by Alembic. Run `alembic upgrade head` from the
+backend/ directory before starting the server.
 
 To run the server:
     uvicorn main:app --reload --host 0.0.0.0 --port 8000
@@ -17,15 +19,13 @@ To run the server:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from config.database import Base, engine
 from config.settings import settings
 
 # ------------------------------------------------------------------ #
-# Import all ORM models before create_all() so SQLAlchemy registers
-# every table in the metadata. Add new model imports here as modules
-# are implemented.
+# Import the models package so SQLAlchemy mappers are registered when
+# the app starts (also keeps model import errors visible at boot).
 # ------------------------------------------------------------------ #
-import models  # noqa: F401 — triggers models/__init__.py which imports Role, User
+import models  # noqa: F401
 
 # ------------------------------------------------------------------ #
 # Module routers — import and register each router here as modules
@@ -78,16 +78,10 @@ app.include_router(recruitment_router, prefix=API_PREFIX)
 # app.include_router(support_router,   prefix=API_PREFIX)
 
 # ------------------------------------------------------------------ #
-# Startup event — create all tables if they do not exist.
-# In production, replace this with a proper Alembic migration.
+# Database schema is managed by Alembic, NOT by Base.metadata.create_all().
+# Apply migrations before starting the server:
+#     cd backend && alembic upgrade head
 # ------------------------------------------------------------------ #
-@app.on_event("startup")
-def on_startup() -> None:
-    """
-    Creates all database tables defined in the SQLAlchemy metadata.
-    Safe to call multiple times — does not drop or modify existing tables.
-    """
-    Base.metadata.create_all(bind=engine)
 
 
 # ------------------------------------------------------------------ #

@@ -1,0 +1,31 @@
+# Local development database for "Unified AI for Enterprise Automation".
+#
+# Usage:
+#   docker compose up -d db      # start PostgreSQL 16 in the background
+#   docker compose down          # stop it (data is kept in the named volume)
+#   docker compose down -v       # stop it AND delete all data
+#
+# The connection string that matches this service (see backend/.env.example):
+#   postgresql+psycopg://enterprise:enterprise@localhost:5432/enterprise_ai
+
+services:
+  db:
+    image: postgres:16
+    container_name: enterprise_ai_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: enterprise
+      POSTGRES_PASSWORD: enterprise
+      POSTGRES_DB: enterprise_ai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U enterprise -d enterprise_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

@@ -5,9 +5,7 @@ SQLAlchemy ORM model for the `candidates` table.
 Used by the Recruitment AI module.
 """
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Enum, Integer
-from sqlalchemy.dialects.mysql import BIGINT
-from sqlalchemy.types import DECIMAL
+from sqlalchemy import Column, String, DateTime, Enum, Integer, Numeric, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -19,7 +17,7 @@ class Candidate(Base):
 
     __tablename__ = "candidates"
 
-    id = Column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     # job_postings table will be created later; use plain FK string to avoid
     # circular import issues — SQLAlchemy resolves it at mapper configure time.
@@ -35,10 +33,11 @@ class Candidate(Base):
     phone        = Column(String(30),  nullable=True)
     resume_path  = Column(String(512), nullable=True)
     linkedin_url = Column(String(512), nullable=True)
-    ai_score     = Column(DECIMAL(5, 2), nullable=True)
+    ai_score     = Column(Numeric(5, 2), nullable=True)
 
     status = Column(
-        Enum("applied", "screening", "interview", "offer", "hired", "rejected"),
+        Enum("applied", "screening", "interview", "offer", "hired", "rejected",
+             name="candidate_status"),
         nullable=False,
         default="applied",
         index=True,
