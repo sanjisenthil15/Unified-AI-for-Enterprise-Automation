@@ -9,7 +9,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login              from './pages/Login/Login';
 import AppLayout          from './layouts/AppLayout';
 import Dashboard          from './pages/Dashboard/Dashboard';
-import Recruitment        from './pages/Recruitment/Recruitment';
 import CustomerSupport    from './pages/CustomerSupport/CustomerSupport';
 import IncidentManagement from './pages/IncidentManagement/IncidentManagement';
 import Meetings           from './pages/Meetings/Meetings';
@@ -41,14 +40,14 @@ export default function App() {
 
           {/* Admin / default routes */}
           <Route path="/dashboard"        element={<Dashboard />} />
-          <Route path="/recruitment"      element={<Recruitment />} />
           <Route path="/customer-support" element={<CustomerSupport />} />
           <Route path="/incidents"        element={<IncidentManagement />} />
           <Route path="/meetings"         element={<Meetings />} />
           <Route path="/analytics"        element={<Analytics />} />
 
-          {/* HR-specific route */}
-          <Route path="/hr" element={<HRDashboard />} />
+          {/* HR recruitment — the real module. /recruitment kept as an alias. */}
+          <Route path="/hr"          element={<HRDashboard />} />
+          <Route path="/recruitment" element={<HRDashboard />} />
 
         </Route>
 

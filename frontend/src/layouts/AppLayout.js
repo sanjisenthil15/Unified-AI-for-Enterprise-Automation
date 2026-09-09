@@ -14,7 +14,7 @@ import './AppLayout.css';
 
 const ALL_NAV = [
   { to: '/dashboard',        icon: '🏠', label: 'Dashboard' },
-  { to: '/recruitment',      icon: '🤖', label: 'Recruitment' },
+  { to: '/hr',               icon: '🧑‍💼', label: 'HR Recruitment' },
   { to: '/customer-support', icon: '🎧', label: 'Customer Support' },
   { to: '/incidents',        icon: '🚨', label: 'Incident Management' },
   { to: '/meetings',         icon: '🎙️', label: 'Meetings' },
