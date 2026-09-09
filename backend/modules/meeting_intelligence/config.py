@@ -52,6 +52,7 @@ class MeetingSettings(BaseSettings):
     # --- AI analysis (pluggable provider) ------------------------------ #
     ai_provider: str = "gemini"                # gemini | ollama
     gemini_model: str = "gemini-3.6-flash"     # matches the Recruitment module
+    analysis_max_transcript_chars: int = 24_000
 
     model_config = SettingsConfigDict(
         env_prefix="MEETING_",

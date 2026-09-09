@@ -17,10 +17,18 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from models.meeting import Meeting
+from models.meeting_action_item import MeetingActionItem
+from models.meeting_analysis import MeetingAnalysis
 from models.meeting_speaker import MeetingSpeaker
 from models.meeting_transcript import MeetingTranscript
 from models.meeting_transcript_segment import MeetingTranscriptSegment
 from modules.meeting_intelligence.config import meeting_settings
+from modules.meeting_intelligence.processing.analysis import (
+    AnalysisError,
+    AnalysisProvider,
+    AnalysisResult,
+    get_analysis_provider,
+)
 from modules.meeting_intelligence.processing.audio import AudioExtractionError, extract_audio
 from modules.meeting_intelligence.processing.diarization import (
     Diarizer,
@@ -296,6 +304,115 @@ def diarize_meeting(
     for row in speakers.values():
         db.refresh(row)
     return list(speakers.values())
+
+
+def _transcript_text_for_analysis(db: Session, meeting_id: int, transcript: MeetingTranscript) -> str:
+    """Diarized transcript ("Speaker N: ...") when segments exist, else the full text."""
+    segments = (
+        db.query(MeetingTranscriptSegment)
+        .filter(MeetingTranscriptSegment.meeting_id == meeting_id)
+        .order_by(MeetingTranscriptSegment.seq)
+        .all()
+    )
+    if segments:
+        text = "\n".join(
+            f"{seg.speaker_label or 'Speaker'}: {seg.text}".strip()
+            for seg in segments
+            if (seg.text or "").strip()
+        )
+    else:
+        text = transcript.full_text or ""
+    limit = meeting_settings.analysis_max_transcript_chars
+    return text[:limit]
+
+
+def analyze_meeting(
+    db: Session,
+    meeting_id: int,
+    *,
+    provider: AnalysisProvider | None = None,
+) -> MeetingAnalysis:
+    """
+    Run AI analysis on a meeting's transcript and persist structured output:
+    summary + key points + decisions in `meeting_analyses`, and each extracted
+    task as a `meeting_action_items` row.
+
+    Action items are created UNASSIGNED (assignment_method='unassigned',
+    assigned_to_* NULL). The assignee the AI heard is kept as free text in
+    `assignee_name_raw` — a human assigns the real person later. No automatic
+    assignment.
+
+    Re-running replaces the analysis and any AI action items a human has not
+    touched; manually assigned / edited items are kept.
+
+    HTTP 422 if there is no transcript, 503 if the provider is not configured,
+    502 on a provider/parse error. Nothing is persisted on failure.
+    """
+    engine = provider or get_analysis_provider()
+    meeting = get_meeting(db, meeting_id)
+
+    transcript = (
+        db.query(MeetingTranscript)
+        .filter(MeetingTranscript.meeting_id == meeting_id)
+        .first()
+    )
+    if transcript is None or not (transcript.full_text or "").strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "Meeting has no transcript. Run transcription first.")
+
+    text = _transcript_text_for_analysis(db, meeting_id, transcript)
+    try:
+        result: AnalysisResult = engine.analyze(text)
+    except AnalysisError as exc:
+        code = (
+            status.HTTP_503_SERVICE_UNAVAILABLE if exc.kind == "config"
+            else status.HTTP_502_BAD_GATEWAY
+        )
+        raise HTTPException(code, f"Meeting analysis failed: {exc}")
+
+    # Reprocess-safe: drop untouched AI action items + the old analysis.
+    db.query(MeetingActionItem).filter(
+        MeetingActionItem.meeting_id == meeting_id,
+        MeetingActionItem.source == "ai",
+        MeetingActionItem.assignment_method == "unassigned",
+        MeetingActionItem.status == "pending",
+    ).delete(synchronize_session=False)
+    old = db.query(MeetingAnalysis).filter(
+        MeetingAnalysis.meeting_id == meeting_id
+    ).first()
+    if old is not None:
+        db.delete(old)
+        db.flush()
+
+    analysis = MeetingAnalysis(
+        meeting_id=meeting_id,
+        summary=result.summary,
+        key_points=result.key_points or None,
+        decisions=result.decisions or None,
+        sentiment=result.sentiment,
+        model_provider=result.model_provider,
+        model_name=result.model_name or None,
+        raw_response=result.raw_response,
+    )
+    db.add(analysis)
+    db.flush()
+
+    for item in result.action_items:
+        db.add(MeetingActionItem(
+            meeting_id=meeting_id,
+            analysis_id=analysis.id,
+            description=item.description,
+            assignee_name_raw=item.assignee_name_raw,   # NOT resolved to a person
+            assignment_method="unassigned",
+            priority=item.priority,
+            status="pending",
+            source="ai",
+            ai_confidence=item.confidence,
+        ))
+
+    db.commit()
+    db.refresh(analysis)
+    return analysis
 
 
 def extract_meeting_audio(

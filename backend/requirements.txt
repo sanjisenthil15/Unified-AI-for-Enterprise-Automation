@@ -12,7 +12,7 @@ python-multipart==0.0.12
 email-validator==2.2.0
 pydantic-settings==2.10.1
 pypdf2==3.0.1
-google-generativeai==0.8.3
+google-genai==1.20.0        # `from google import genai` — used by recruitment + meeting analysis
 
 # --- Meeting Intelligence (offline processing) ---
 faster-whisper==1.2.1      # offline speech-to-text
