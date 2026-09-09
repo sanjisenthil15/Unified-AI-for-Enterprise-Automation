@@ -97,6 +97,20 @@ class MeetingVideoStorage(ABC):
         ...
 
     @abstractmethod
+    def derived_target(self, meeting_id: int, filename: str) -> Path:
+        """
+        Absolute path a processing step should WRITE a derived artefact to
+        (e.g. the extracted audio). The parent directory is created.
+
+        A cloud backend would return a temp path here and upload it on
+        `to_relative()` / a dedicated save call.
+        """
+
+    @abstractmethod
+    def to_relative(self, absolute_path: Path | str) -> str:
+        """Map an absolute path under the backend root back to a stored key."""
+
+    @abstractmethod
     def delete_meeting_files(self, meeting_id: int) -> None:
         """Remove every file for a meeting. Idempotent — missing is not an error."""
 
@@ -192,6 +206,17 @@ class LocalMeetingVideoStorage(MeetingVideoStorage):
             return self.resolve(relative_path).is_file()
         except StorageError:
             return False
+
+    def derived_target(self, meeting_id: int, filename: str) -> Path:
+        mdir = self._meeting_dir(meeting_id)
+        mdir.mkdir(parents=True, exist_ok=True)
+        return mdir / filename
+
+    def to_relative(self, absolute_path: Path | str) -> str:
+        p = Path(absolute_path).resolve()
+        if p != self.base_dir and self.base_dir not in p.parents:
+            raise StorageError(f"Path is outside the storage root: {absolute_path!r}")
+        return p.relative_to(self.base_dir).as_posix()
 
     def delete_meeting_files(self, meeting_id: int) -> None:
         mdir = self._meeting_dir(meeting_id)

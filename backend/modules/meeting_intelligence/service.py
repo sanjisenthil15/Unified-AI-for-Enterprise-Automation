@@ -16,6 +16,8 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from models.meeting import Meeting
+from modules.meeting_intelligence.config import meeting_settings
+from modules.meeting_intelligence.processing.audio import AudioExtractionError, extract_audio
 from modules.meeting_intelligence.storage import (
     EmptyUploadError,
     FileTooLargeError,
@@ -96,6 +98,56 @@ def get_meeting(db: Session, meeting_id: int) -> Meeting:
     meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
     if meeting is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Meeting id={meeting_id} not found.")
+    return meeting
+
+
+def extract_meeting_audio(
+    db: Session,
+    meeting_id: int,
+    *,
+    storage: MeetingVideoStorage | None = None,
+) -> Meeting:
+    """
+    Extract audio from a meeting's stored video and record `audio_path`
+    (relative reference only — no bytes in the DB). The source video is
+    preserved. Pipeline status transitions are handled by pipeline.py
+    (Phase 8), not here.
+
+    Raises HTTP 422 if the meeting has no source video, the video file is
+    missing from storage, or FFmpeg fails. No partial audio file is left on
+    failure.
+    """
+    storage = storage or get_storage()
+    meeting = get_meeting(db, meeting_id)
+
+    if not meeting.source_video_path:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "Meeting has no source video to extract audio from.")
+
+    try:
+        source = storage.resolve(meeting.source_video_path)
+    except StorageError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+    if not source.is_file():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "Source video file is missing from storage.")
+
+    target = storage.derived_target(meeting_id, meeting_settings.audio_filename)
+    try:
+        info = extract_audio(
+            source, target,
+            sample_rate=meeting_settings.audio_sample_rate,
+            channels=meeting_settings.audio_channels,
+        )
+    except AudioExtractionError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            f"Audio extraction failed: {exc}")
+
+    meeting.audio_path = storage.to_relative(info.path)
+    if info.duration_sec:
+        meeting.duration_sec = info.duration_sec
+    db.commit()
+    db.refresh(meeting)
     return meeting
 
 

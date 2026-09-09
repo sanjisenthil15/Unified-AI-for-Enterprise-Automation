@@ -30,6 +30,11 @@ class MeetingSettings(BaseSettings):
         ".mp3", ".wav", ".m4a", ".aac", ".flac",
     )
 
+    # --- audio extraction (imageio-ffmpeg) ----------------------------- #
+    audio_sample_rate: int = 16_000      # 16 kHz mono is what faster-whisper expects
+    audio_channels: int = 1
+    audio_filename: str = "audio.wav"
+
     # --- offline transcription (faster-whisper) -------------------------- #
     whisper_model: str = "base"          # tiny | base | small | medium | large-v3
     whisper_device: str = "cpu"          # cpu | cuda
