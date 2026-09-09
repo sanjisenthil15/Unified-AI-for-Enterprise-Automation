@@ -5,8 +5,7 @@ SQLAlchemy ORM model for the `incidents` table.
 Used by the Incident Management module.
 """
 
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Enum
-from sqlalchemy.dialects.mysql import BIGINT
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Enum, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -18,16 +17,16 @@ class Incident(Base):
 
     __tablename__ = "incidents"
 
-    id = Column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     reported_by = Column(
-        BIGINT(unsigned=True),
+        BigInteger,
         ForeignKey("users.id", onupdate="CASCADE", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
     assigned_to = Column(
-        BIGINT(unsigned=True),
+        BigInteger,
         ForeignKey("users.id", onupdate="CASCADE", ondelete="SET NULL"),
         nullable=True,
         index=True,
@@ -39,13 +38,13 @@ class Incident(Base):
     root_cause      = Column(Text,         nullable=True)
 
     severity = Column(
-        Enum("low", "medium", "high", "critical"),
+        Enum("low", "medium", "high", "critical", name="incident_severity"),
         nullable=False,
         default="medium",
         index=True,
     )
     status = Column(
-        Enum("open", "investigating", "resolved", "closed"),
+        Enum("open", "investigating", "resolved", "closed", name="incident_status"),
         nullable=False,
         default="open",
         index=True,

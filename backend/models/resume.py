@@ -5,8 +5,7 @@ SQLAlchemy ORM model for the `resumes` table.
 Stores the uploaded PDF path, extracted raw text, and (later) AI analysis results.
 """
 
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Enum, Float
-from sqlalchemy.dialects.mysql import BIGINT
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Enum, Float, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -22,11 +21,11 @@ class Resume(Base):
 
     __tablename__ = "resumes"
 
-    id = Column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     # Which job posting this resume belongs to
     job_posting_id = Column(
-        BIGINT(unsigned=True),
+        BigInteger,
         ForeignKey("job_postings.id", onupdate="CASCADE", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -49,14 +48,14 @@ class Resume(Base):
     strengths       = Column(Text,       nullable=True, comment="JSON list of identified strengths")
     missing_skills  = Column(Text,       nullable=True, comment="JSON list of skills gaps")
     recommendation  = Column(
-        Enum("selected", "hold", "rejected"),
+        Enum("selected", "hold", "rejected", name="resume_recommendation"),
         nullable=True,
         comment="AI recommendation — HR makes the final decision",
     )
 
     # Processing state
     status = Column(
-        Enum("uploaded", "extracted", "analysed", "error"),
+        Enum("uploaded", "extracted", "analysed", "error", name="resume_status"),
         nullable=False,
         default="uploaded",
         index=True,

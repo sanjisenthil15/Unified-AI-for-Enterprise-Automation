@@ -2,14 +2,13 @@
 models/role.py
 
 SQLAlchemy ORM model for the `roles` table.
-Roles are seeded once and referenced by every user record.
+Roles are seeded once (see the initial Alembic migration) and referenced
+by every user record.
 
-Supported roles (seeded in migration):
-    admin, manager, customer, support_executive, hr, it_engineer, employee
+Seeded roles: admin, hr_manager, support_agent, recruiter, employee, viewer
 """
 
-from sqlalchemy import Column, String, Text, DateTime
-from sqlalchemy.dialects.mysql import TINYINT
+from sqlalchemy import Column, Integer, String, Text, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -26,7 +25,7 @@ class Role(Base):
     __tablename__ = "roles"
 
     id = Column(
-        TINYINT(unsigned=True),
+        Integer,
         primary_key=True,
         autoincrement=True,
     )
@@ -35,7 +34,7 @@ class Role(Base):
         nullable=False,
         unique=True,
         index=True,
-        comment="Unique role identifier, e.g. 'admin', 'hr', 'employee'",
+        comment="Unique role identifier, e.g. 'admin', 'hr_manager', 'employee'",
     )
     description = Column(
         Text,

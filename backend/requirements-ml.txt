@@ -1,0 +1,21 @@
+# Optional heavy ML stack for offline SPEAKER DIARIZATION (Meeting Intelligence, Phase 6).
+#
+# The app runs without this: modules/meeting_intelligence/processing/diarization.py
+# falls back to a single "Speaker 1" label when resemblyzer/torch are absent.
+#
+# Install (two steps, on purpose):
+#     pip install -r requirements-ml.txt
+#     pip install --no-deps resemblyzer==0.1.4
+#
+# Why --no-deps: resemblyzer (2021) declares a dependency on the source-only
+# `webrtcvad`, which needs a C/C++ compiler to build on Windows. `webrtcvad-wheels`
+# below ships the identical `webrtcvad` module prebuilt, so resemblyzer is
+# installed without re-pulling its declared deps (all of which are listed here).
+
+-r requirements.txt
+
+torch==2.14.0
+librosa==1.0.0
+scipy==1.18.1
+numpy==2.5.3
+webrtcvad-wheels==2.0.14
