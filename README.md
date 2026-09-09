@@ -20,35 +20,53 @@ A modular, scalable enterprise web application with a centralized AI Decision En
 
 ## Getting Started
 
+**Prerequisites:** Python 3.12, Node 18+, and PostgreSQL 16 (or Docker).
+
+Auth is currently **disabled for development** — no login screen, every request
+runs as a seeded admin. (Set `AUTH_DISABLED=false` + `REACT_APP_AUTH_DISABLED=false`
+to turn JWT/RBAC back on; a demo account `demo@demo.com` / `Demo1234` also exists.)
+
 ### 1. Database
 ```bash
-docker compose up -d db          # PostgreSQL 16 on localhost:5432
+docker compose up -d db          # PostgreSQL 16 on localhost:5432  (user/pass/db: enterprise)
 ```
-Or point `DATABASE_URL` at your own PostgreSQL instance.
+No Docker? Use a local PostgreSQL and create a database, e.g. `createdb enterprise_ai`.
 
-### 2. Backend
-```bash
+### 2. Backend  — terminal 1
+```bat
 cd backend
-python -m venv .venv && source .venv/Scripts/activate   # Windows: .venv\Scripts\activate
+python -m venv .venv
+.venv\Scripts\activate                       :: macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env             # then edit SECRET_KEY / GEMINI_API_KEY
-alembic upgrade head             # create/upgrade all tables
-uvicorn main:app --reload        # http://127.0.0.1:8000/docs
+copy .env.example .env                        :: then edit — see below
+alembic upgrade head                          :: creates tables + seeds roles + demo user
+uvicorn main:app --reload                     :: http://127.0.0.1:8000/docs
+```
+Edit `backend/.env`:
+```
+DATABASE_URL=postgresql+psycopg://enterprise:enterprise@localhost:5432/enterprise_ai
+SECRET_KEY=any-long-random-string
+GEMINI_API_KEY=your-key        # optional — only the meeting "analysis" step needs it
+AUTH_DISABLED=true
 ```
 
-Optional — offline speaker-diarization stack for Meeting Intelligence
-(the app runs without it; diarization falls back to a single speaker):
+Optional — real speaker diarization for Meeting Intelligence (adds PyTorch;
+without it every speaker is labelled "Speaker 1"):
 ```bash
 pip install -r requirements-ml.txt
 pip install --no-deps resemblyzer==0.1.4
 ```
 
-### 3. Frontend
-```bash
+### 3. Frontend  — terminal 2
+```bat
 cd frontend
 npm install
-npm start                        # http://localhost:3000
+copy .env.example .env                        :: contains REACT_APP_AUTH_DISABLED=true
+npm start                                     :: http://localhost:3000
 ```
+
+Open `http://localhost:3000` — it lands straight on the dashboard. Sidebar →
+**HR Recruitment** or **Meetings**.
 
 ### Database migrations
 - Apply latest schema:    `cd backend && alembic upgrade head`
