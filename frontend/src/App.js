@@ -18,9 +18,13 @@ import HRDashboard        from './pages/HRDashboard/HRDashboard';
 
 import './App.css';
 
-/** Redirect to /login if no token in localStorage. */
+// Dev flag — when set (and the backend also has AUTH_DISABLED=true), the app
+// runs without logging in. See backend/.env AUTH_DISABLED.
+const AUTH_DISABLED = process.env.REACT_APP_AUTH_DISABLED === 'true';
+
+/** Redirect to /login if not authenticated (unless auth is disabled for dev). */
 function ProtectedRoute({ children }) {
-  return localStorage.getItem('access_token')
+  return AUTH_DISABLED || localStorage.getItem('access_token')
     ? children
     : <Navigate to="/login" replace />;
 }
@@ -48,7 +52,7 @@ export default function App() {
 
         </Route>
 
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<Navigate to={AUTH_DISABLED ? '/dashboard' : '/login'} replace />} />
       </Routes>
     </BrowserRouter>
   );
