@@ -37,6 +37,23 @@ class AudioInfo:
     size_bytes: int
 
 
+_FFMPEG_ERR_HINT = re.compile(
+    r"error|invalid data|not found|no such|denied|unsupported|does not contain|"
+    r"could not|failed|moov atom",
+    re.IGNORECASE,
+)
+
+
+def _ffmpeg_reason(stderr: str | None) -> str:
+    """A short, path-free explanation from FFmpeg's noisy stderr."""
+    lines = [ln.strip() for ln in (stderr or "").splitlines() if ln.strip()]
+    hits = [ln for ln in lines if _FFMPEG_ERR_HINT.search(ln) and "libav" not in ln.lower()]
+    picked = (hits or lines)[-2:]
+    # drop any absolute path token FFmpeg echoes for the input file
+    cleaned = re.sub(r"\S*[/\\]\S+\.\w+", "the video file", " | ".join(picked))
+    return f"could not process the video ({cleaned or 'unknown error'})"
+
+
 def _cleanup(path: Path) -> None:
     try:
         Path(path).unlink(missing_ok=True)
@@ -110,8 +127,7 @@ def extract_audio(
     ok = proc.returncode == 0 and target.is_file() and target.stat().st_size > 44
     if not ok:
         _cleanup(target)
-        tail = " / ".join((proc.stderr or "").strip().splitlines()[-12:])
-        raise AudioExtractionError(f"FFmpeg failed (exit {proc.returncode}): {tail}")
+        raise AudioExtractionError(_ffmpeg_reason(proc.stderr))
 
     size = target.stat().st_size
     duration = _parse_duration(proc.stderr) or _duration_from_pcm(size, sample_rate, channels)

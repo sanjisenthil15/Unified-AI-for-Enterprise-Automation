@@ -16,11 +16,14 @@ background task owns its own DB session; it must not reuse the request's.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 from config.database import SessionLocal
 from config.settings import settings
 from models.meeting import Meeting
+from modules.meeting_intelligence.config import meeting_settings
 from modules.meeting_intelligence.service import (
     analyze_meeting,
     diarize_meeting,
@@ -38,25 +41,45 @@ def _stages():
     )
 
 
+_PLACEHOLDER_KEYS = {"", "your_gemini_api_key_here", "changeme"}
+_WIN_ABS_PATH = re.compile(r"[A-Za-z]:\\[^\s'\"]+")
+
+
 def _scrub(message: str) -> str:
-    """Never let a configured secret appear in a stored error message."""
+    """
+    Sanitise a message before it is stored / returned:
+      - remove the configured Gemini API key
+      - collapse internal filesystem paths to a bare name
+    """
+    message = str(message or "")
+
     key = (settings.GEMINI_API_KEY or "").strip()
-    if key and len(key) >= 8 and key not in {"your_gemini_api_key_here", "changeme"}:
+    if key and len(key) >= 12 and key not in _PLACEHOLDER_KEYS:
         message = message.replace(key, "***")
-    return message[:2000]
+
+    try:
+        root = str(meeting_settings.storage_path)
+        for variant in {root, root.replace("\\", "/")}:
+            if variant:
+                message = message.replace(variant, "<storage>")
+    except Exception:
+        pass
+    message = _WIN_ABS_PATH.sub(lambda m: Path(m.group(0)).name, message)
+
+    return message.strip()[:1000]
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _mark_failed(db, meeting_id: int, stage: str, detail: str) -> None:
+def _mark_failed(db, meeting_id: int, message: str) -> None:
     db.rollback()
     meeting = db.get(Meeting, meeting_id)
     if meeting is None:
         return
     meeting.status = "failed"
-    meeting.error_message = _scrub(f"{stage} failed: {detail}")
+    meeting.error_message = _scrub(message)
     meeting.processing_finished_at = _now()
     db.commit()
 
@@ -79,7 +102,7 @@ def run_meeting_pipeline(meeting_id: int) -> None:
                 stage_fn(db, meeting_id)
             except Exception as exc:  # noqa: BLE001
                 detail = getattr(exc, "detail", None) or str(exc)
-                _mark_failed(db, meeting_id, stage_name, str(detail))
+                _mark_failed(db, meeting_id, f"{stage_name} stage — {detail}")
                 return
 
         meeting = db.get(Meeting, meeting_id)
@@ -89,7 +112,7 @@ def run_meeting_pipeline(meeting_id: int) -> None:
             db.commit()
     except Exception as exc:  # noqa: BLE001 — last-resort guard
         try:
-            _mark_failed(db, meeting_id, "pipeline", str(exc))
+            _mark_failed(db, meeting_id, f"pipeline error: {exc}")
         except Exception:
             pass
     finally:

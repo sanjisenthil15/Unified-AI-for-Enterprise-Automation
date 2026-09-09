@@ -270,7 +270,8 @@ def test_real_pipeline_transitions_and_marks_failed(client, new_user, monkeypatc
     mid = _upload(client, u["headers"]).json()["id"]  # real run_meeting_pipeline runs in bg
     body = client.get(f"/api/v1/meetings/{mid}", headers=u["headers"]).json()
     assert body["status"] == "failed"
-    assert "audio extraction failed" in body["error_message"]
+    assert "audio extraction stage" in body["error_message"]
+    assert "missing from storage" in body["error_message"]
 
 
 def test_real_pipeline_completes_with_faked_stages(client, new_user, monkeypatch):
