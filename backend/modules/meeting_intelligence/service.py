@@ -11,13 +11,21 @@ are added in later phases via pipeline.py; nothing here starts processing.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Callable
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from models.meeting import Meeting
+from models.meeting_transcript import MeetingTranscript
+from models.meeting_transcript_segment import MeetingTranscriptSegment
 from modules.meeting_intelligence.config import meeting_settings
 from modules.meeting_intelligence.processing.audio import AudioExtractionError, extract_audio
+from modules.meeting_intelligence.processing.transcription import (
+    TranscriptionError,
+    TranscriptionResult,
+    transcribe_audio,
+)
 from modules.meeting_intelligence.storage import (
     EmptyUploadError,
     FileTooLargeError,
@@ -26,6 +34,9 @@ from modules.meeting_intelligence.storage import (
     UnsupportedMediaError,
     get_storage,
 )
+
+# A transcriber takes an audio path and returns a TranscriptionResult.
+Transcriber = Callable[[str], TranscriptionResult]
 
 
 def create_meeting(
@@ -99,6 +110,87 @@ def get_meeting(db: Session, meeting_id: int) -> Meeting:
     if meeting is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Meeting id={meeting_id} not found.")
     return meeting
+
+
+def transcribe_meeting(
+    db: Session,
+    meeting_id: int,
+    *,
+    storage: MeetingVideoStorage | None = None,
+    transcriber: Transcriber | None = None,
+) -> MeetingTranscript:
+    """
+    Run offline speech-to-text on a meeting's extracted audio and persist the
+    result: the full transcript in `meeting_transcripts` and each timestamped
+    segment (ms) in `meeting_transcript_segments`.
+
+    Speaker attribution is NOT done here — every segment is stored with
+    speaker_id / speaker_label = NULL (diarization is Phase 6).
+
+    Re-running replaces any previous transcript + segments for the meeting.
+    Raises HTTP 422 if there is no extracted audio, the audio file is missing,
+    or transcription fails.
+    """
+    storage = storage or get_storage()
+    run = transcriber or transcribe_audio
+    meeting = get_meeting(db, meeting_id)
+
+    if not meeting.audio_path:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "Meeting has no extracted audio. Run audio extraction first.")
+    try:
+        audio = storage.resolve(meeting.audio_path)
+    except StorageError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+    if not audio.is_file():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "Audio file is missing from storage.")
+
+    try:
+        result: TranscriptionResult = run(str(audio))
+    except TranscriptionError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            f"Transcription failed: {exc}")
+
+    # Reprocess-safe: drop any existing transcript + segments first.
+    db.query(MeetingTranscriptSegment).filter(
+        MeetingTranscriptSegment.meeting_id == meeting_id
+    ).delete(synchronize_session=False)
+    old = db.query(MeetingTranscript).filter(
+        MeetingTranscript.meeting_id == meeting_id
+    ).first()
+    if old is not None:
+        db.delete(old)
+        db.flush()
+
+    transcript = MeetingTranscript(
+        meeting_id=meeting_id,
+        full_text=result.text,
+        language=result.language,
+        whisper_model=result.model,
+        word_count=len(result.text.split()),
+        segment_count=len(result.segments),
+    )
+    db.add(transcript)
+    for seg in result.segments:
+        db.add(MeetingTranscriptSegment(
+            meeting_id=meeting_id,
+            speaker_id=None,        # diarization is Phase 6
+            speaker_label=None,
+            seq=seg.seq,
+            start_ms=seg.start_ms,
+            end_ms=seg.end_ms,
+            text=seg.text,
+        ))
+
+    if result.language:
+        meeting.language = result.language
+    if not meeting.whisper_model:
+        meeting.whisper_model = result.model
+
+    db.commit()
+    db.refresh(transcript)
+    return transcript
 
 
 def extract_meeting_audio(
