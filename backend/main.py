@@ -32,6 +32,7 @@ import models  # noqa: F401
 # are implemented. Only the auth router is active at this stage.
 # ------------------------------------------------------------------ #
 from auth.router import router as auth_router
+from modules.meeting_intelligence.router import router as meeting_router
 from modules.recruitment.router import router as recruitment_router
 
 # ------------------------------------------------------------------ #
@@ -69,11 +70,10 @@ API_PREFIX = "/api/v1"
 
 app.include_router(auth_router,        prefix=API_PREFIX)
 app.include_router(recruitment_router, prefix=API_PREFIX)
+app.include_router(meeting_router,     prefix=API_PREFIX)
 # Future modules will be registered here, for example:
 # app.include_router(employee_router,  prefix=API_PREFIX)
 # app.include_router(incident_router,  prefix=API_PREFIX)
-# app.include_router(recruitment_router, prefix=API_PREFIX)
-# app.include_router(meeting_router,   prefix=API_PREFIX)
 # app.include_router(analytics_router, prefix=API_PREFIX)
 # app.include_router(support_router,   prefix=API_PREFIX)
 

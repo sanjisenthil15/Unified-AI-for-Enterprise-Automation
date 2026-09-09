@@ -128,6 +128,82 @@ def get_meeting(db: Session, meeting_id: int) -> Meeting:
     return meeting
 
 
+def get_owned_meeting(db: Session, meeting_id: int, user_id: int) -> Meeting:
+    """
+    Fetch a meeting that belongs to `user_id`. A meeting owned by someone else
+    is reported as 404 (never reveal that it exists).
+    """
+    meeting = (
+        db.query(Meeting)
+        .filter(Meeting.id == meeting_id, Meeting.created_by == user_id)
+        .first()
+    )
+    if meeting is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Meeting id={meeting_id} not found.")
+    return meeting
+
+
+def list_meetings(db: Session, user_id: int, *, skip: int = 0, limit: int = 50) -> list[Meeting]:
+    """A user's meeting history, newest first."""
+    return (
+        db.query(Meeting)
+        .filter(Meeting.created_by == user_id)
+        .order_by(Meeting.created_at.desc(), Meeting.id.desc())
+        .offset(max(skip, 0))
+        .limit(min(max(limit, 1), 200))
+        .all()
+    )
+
+
+def get_meeting_transcript(db: Session, meeting_id: int) -> MeetingTranscript:
+    transcript = (
+        db.query(MeetingTranscript)
+        .filter(MeetingTranscript.meeting_id == meeting_id)
+        .first()
+    )
+    if transcript is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Transcript is not available yet.")
+    return transcript
+
+
+def list_meeting_segments(db: Session, meeting_id: int) -> list[MeetingTranscriptSegment]:
+    return (
+        db.query(MeetingTranscriptSegment)
+        .filter(MeetingTranscriptSegment.meeting_id == meeting_id)
+        .order_by(MeetingTranscriptSegment.seq)
+        .all()
+    )
+
+
+def list_meeting_speakers(db: Session, meeting_id: int) -> list[MeetingSpeaker]:
+    return (
+        db.query(MeetingSpeaker)
+        .filter(MeetingSpeaker.meeting_id == meeting_id)
+        .order_by(MeetingSpeaker.label)
+        .all()
+    )
+
+
+def get_meeting_analysis(db: Session, meeting_id: int) -> MeetingAnalysis:
+    analysis = (
+        db.query(MeetingAnalysis)
+        .filter(MeetingAnalysis.meeting_id == meeting_id)
+        .first()
+    )
+    if analysis is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Analysis is not available yet.")
+    return analysis
+
+
+def list_meeting_action_items(db: Session, meeting_id: int) -> list[MeetingActionItem]:
+    return (
+        db.query(MeetingActionItem)
+        .filter(MeetingActionItem.meeting_id == meeting_id)
+        .order_by(MeetingActionItem.id)
+        .all()
+    )
+
+
 def transcribe_meeting(
     db: Session,
     meeting_id: int,

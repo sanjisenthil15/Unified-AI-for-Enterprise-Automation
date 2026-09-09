@@ -43,6 +43,8 @@ def _cleanup_test_rows() -> None:
             "(SELECT id FROM job_postings WHERE created_by = ANY(:ids))"
         ), {"ids": user_ids})
         conn.execute(text("DELETE FROM job_postings WHERE created_by = ANY(:ids)"), {"ids": user_ids})
+        # meeting children cascade from meetings (ON DELETE CASCADE)
+        conn.execute(text("DELETE FROM meetings WHERE created_by = ANY(:ids)"), {"ids": user_ids})
         conn.execute(text("DELETE FROM users WHERE id = ANY(:ids)"), {"ids": user_ids})
 
 
@@ -53,10 +55,43 @@ def _db_cleanup():
     _cleanup_test_rows()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _meeting_storage_tmp(tmp_path_factory):
+    """Point Meeting Intelligence file storage at a throwaway dir for the whole run."""
+    from modules.meeting_intelligence import storage as _storage
+    from modules.meeting_intelligence.config import meeting_settings
+
+    original = meeting_settings.storage_dir
+    meeting_settings.storage_dir = str(tmp_path_factory.mktemp("meeting_storage"))
+    _storage._default_storage = None
+    yield
+    meeting_settings.storage_dir = original
+    _storage._default_storage = None
+
+
 @pytest.fixture(scope="session")
 def client():
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+def new_user(client):
+    """Factory: register + log in a fresh user, return {id, email, headers}."""
+    def _make(full_name: str = "Pytest User") -> dict:
+        email = f"pytest_{uuid.uuid4().hex[:10]}@example.com"
+        password = "Str0ngPass1"
+        r = client.post("/api/v1/auth/register", json={
+            "full_name": full_name, "email": email, "password": password, "role_id": 1,
+        })
+        assert r.status_code == 201, r.text
+        r = client.post("/api/v1/auth/login", json={"email": email, "password": password})
+        assert r.status_code == 200, r.text
+        headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+        me = client.get("/api/v1/auth/me", headers=headers).json()
+        return {"id": me["id"], "email": email, "headers": headers}
+
+    return _make
 
 
 @pytest.fixture

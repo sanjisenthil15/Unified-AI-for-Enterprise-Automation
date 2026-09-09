@@ -18,8 +18,14 @@ from sqlalchemy.sql import func
 from config.database import Base
 
 # Pipeline states — see modules/meeting_intelligence/pipeline.py
+#   pending      : uploaded, background pipeline not started yet
+#   processing   : pipeline running (audio -> transcription -> diarization -> analysis)
+#   completed    : all stages succeeded
+#   failed       : an unrecoverable error (see error_message)
+# The granular *_ing values remain defined for optional finer-grained progress.
 MEETING_STATUSES = (
     "pending",
+    "processing",
     "extracting_audio",
     "transcribing",
     "diarizing",

@@ -1,5 +1,4 @@
-"""Phase 1 smoke test: the Meeting Intelligence skeleton imports cleanly and
-is isolated (no routes wired, no tables registered)."""
+"""Module-structure smoke tests for the Meeting Intelligence package."""
 
 import importlib
 
@@ -27,27 +26,27 @@ def test_module_imports(name):
     importlib.import_module(name)
 
 
-def test_router_has_no_routes_yet():
-    from modules.meeting_intelligence.router import router
-    assert router.prefix == "/meetings"
-    assert router.routes == []
-
-
 def test_config_defaults():
     from modules.meeting_intelligence.config import meeting_settings
     assert meeting_settings.whisper_model == "base"
+    assert meeting_settings.whisper_device == "cpu"
     assert meeting_settings.diarization_backend == "resemblyzer"
     assert meeting_settings.ai_provider == "gemini"
-    assert meeting_settings.storage_path.name == "meetings"
 
 
-def test_meeting_router_not_registered_in_app():
-    """No /meetings endpoint until Phase 8."""
+def test_router_registered_in_app():
     from main import app
     paths = {r.path for r in app.routes}
-    assert not any(p.startswith("/api/v1/meetings") for p in paths)
+    assert "/api/v1/meetings" in paths
+    assert "/api/v1/meetings/{meeting_id}" in paths
+    assert "/api/v1/meetings/{meeting_id}/transcript" in paths
+    assert "/api/v1/meetings/{meeting_id}/analysis" in paths
+    assert "/api/v1/meetings/{meeting_id}/action-items" in paths
 
 
-def test_meeting_router_still_has_no_routes():
-    from modules.meeting_intelligence.router import router
-    assert router.routes == []
+def test_meeting_tables_registered():
+    from config.database import Base
+    for t in ("meetings", "meeting_transcripts", "meeting_transcript_segments",
+              "meeting_speakers", "meeting_analyses", "meeting_action_items",
+              "meeting_participants"):
+        assert t in Base.metadata.tables
