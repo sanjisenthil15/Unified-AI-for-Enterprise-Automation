@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from config.database import engine  # noqa: E402
+from config.database import SessionLocal, engine  # noqa: E402
 from main import app  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
@@ -62,6 +62,41 @@ def client():
 @pytest.fixture
 def unique_email() -> str:
     return f"pytest_{uuid.uuid4().hex[:10]}@example.com"
+
+
+@pytest.fixture
+def db():
+    """A raw SQLAlchemy session for ORM-level tests."""
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
+
+
+@pytest.fixture
+def meeting_owner(db) -> int:
+    """A user id to own meetings. Removes its meetings + itself on teardown."""
+    import uuid as _uuid
+    from models.user import User
+    from models.meeting import Meeting
+
+    user = User(
+        role_id=1,
+        full_name="MI Owner",
+        email=f"pytest_{_uuid.uuid4().hex[:10]}@example.com",
+        hashed_password="x",
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    uid = user.id
+    yield uid
+    db.query(Meeting).filter(Meeting.created_by == uid).delete()
+    db.commit()
+    db.query(User).filter(User.id == uid).delete()
+    db.commit()
 
 
 @pytest.fixture
