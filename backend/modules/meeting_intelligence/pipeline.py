@@ -23,6 +23,8 @@ from pathlib import Path
 from config.database import SessionLocal
 from config.settings import settings
 from models.meeting import Meeting
+from models.meeting_speaker import MeetingSpeaker
+from models.meeting_transcript import MeetingTranscript
 from modules.meeting_intelligence.config import meeting_settings
 from modules.meeting_intelligence.service import (
     analyze_meeting,
@@ -30,6 +32,7 @@ from modules.meeting_intelligence.service import (
     extract_meeting_audio,
     transcribe_meeting,
 )
+from modules.meeting_intelligence.storage import get_storage
 
 def _stages():
     # Built per call so tests can monkeypatch the stage functions on this module.
@@ -73,6 +76,23 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _stage_done(db, meeting_id: int, stage_name: str) -> bool:
+    """On a resume, has this stage's output already been produced?"""
+    if stage_name == "audio extraction":
+        meeting = db.get(Meeting, meeting_id)
+        if not meeting or not meeting.audio_path:
+            return False
+        try:
+            return get_storage().exists(meeting.audio_path)
+        except Exception:
+            return False
+    if stage_name == "transcription":
+        return db.query(MeetingTranscript).filter_by(meeting_id=meeting_id).first() is not None
+    if stage_name == "speaker diarization":
+        return db.query(MeetingSpeaker).filter_by(meeting_id=meeting_id).first() is not None
+    return False  # analysis always re-runs on a resume
+
+
 def _mark_failed(db, meeting_id: int, message: str) -> None:
     db.rollback()
     meeting = db.get(Meeting, meeting_id)
@@ -84,8 +104,14 @@ def _mark_failed(db, meeting_id: int, message: str) -> None:
     db.commit()
 
 
-def run_meeting_pipeline(meeting_id: int) -> None:
-    """Process one meeting end to end. Safe to call from a background task."""
+def run_meeting_pipeline(meeting_id: int, *, resume: bool = False) -> None:
+    """
+    Process one meeting end to end. Safe to call from a background task.
+
+    `resume=True` (used by the reprocess endpoint) skips any stage whose
+    output already exists, so retrying a meeting that only failed at the
+    analysis stage re-runs just that stage.
+    """
     db = SessionLocal()
     try:
         meeting = db.get(Meeting, meeting_id)
@@ -98,6 +124,8 @@ def run_meeting_pipeline(meeting_id: int) -> None:
         db.commit()
 
         for stage_name, stage_fn in _stages():
+            if resume and _stage_done(db, meeting_id, stage_name):
+                continue
             try:
                 stage_fn(db, meeting_id)
             except Exception as exc:  # noqa: BLE001

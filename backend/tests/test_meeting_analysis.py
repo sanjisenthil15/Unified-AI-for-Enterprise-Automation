@@ -246,6 +246,60 @@ def test_gemini_provider_without_key_raises_config_error():
     assert ei.value.kind == "config"
 
 
+def test_is_retryable_classification():
+    from modules.meeting_intelligence.processing.analysis import _is_retryable
+    assert _is_retryable("503 UNAVAILABLE high demand")
+    assert _is_retryable("429 RESOURCE_EXHAUSTED quotaId per-minute")
+    # daily quota is NOT retryable
+    assert not _is_retryable("429 GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+    assert not _is_retryable("400 INVALID_ARGUMENT")
+
+
+def test_gemini_provider_retries_transient_429_then_succeeds(monkeypatch):
+    import modules.meeting_intelligence.processing.analysis as amod
+    monkeypatch.setattr(amod.time, "sleep", lambda *_: None)
+
+    calls = {"n": 0}
+    good = '{"summary":"ok done","key_points":[],"decisions":[],"sentiment":"neutral","action_items":[]}'
+
+    class FakeModels:
+        def generate_content(self, **_):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise RuntimeError("429 RESOURCE_EXHAUSTED retryDelay: 2s (per-minute)")
+            return type("R", (), {"text": good})()
+
+    class FakeClient:
+        def __init__(self, **_):
+            self.models = FakeModels()
+
+    monkeypatch.setattr("google.genai.Client", FakeClient)
+    r = GeminiAnalysisProvider(api_key="x", max_retries=3).analyze("Speaker 1: hi")
+    assert r.summary == "ok done"
+    assert calls["n"] == 3
+
+
+def test_gemini_provider_daily_quota_fails_fast(monkeypatch):
+    import modules.meeting_intelligence.processing.analysis as amod
+    slept = []
+    monkeypatch.setattr(amod.time, "sleep", lambda s: slept.append(s))
+
+    class FakeModels:
+        def generate_content(self, **_):
+            raise RuntimeError("429 RESOURCE_EXHAUSTED GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+
+    class FakeClient:
+        def __init__(self, **_):
+            self.models = FakeModels()
+
+    monkeypatch.setattr("google.genai.Client", FakeClient)
+    with pytest.raises(AnalysisError) as ei:
+        GeminiAnalysisProvider(api_key="x", max_retries=3).analyze("Speaker 1: hi")
+    assert ei.value.kind == "api"
+    assert "quota" in str(ei.value).lower()
+    assert slept == []  # no retries for a daily cap
+
+
 # --------------------------------------------------------------------------- #
 # real Gemini
 # --------------------------------------------------------------------------- #

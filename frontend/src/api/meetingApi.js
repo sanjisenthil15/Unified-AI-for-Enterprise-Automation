@@ -66,6 +66,11 @@ export async function getActionItems(id) {
   return res.data;
 }
 
+export async function reprocessMeeting(id) {
+  const res = await axiosInstance.post(`/api/v1/meetings/${id}/reprocess`);
+  return res.data;
+}
+
 export async function deleteMeeting(id) {
   await axiosInstance.delete(`/api/v1/meetings/${id}`);
 }

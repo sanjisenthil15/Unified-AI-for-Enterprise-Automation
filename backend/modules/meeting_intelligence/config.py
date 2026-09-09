@@ -51,7 +51,9 @@ class MeetingSettings(BaseSettings):
 
     # --- AI analysis (pluggable provider) ------------------------------ #
     ai_provider: str = "gemini"                # gemini | ollama
-    gemini_model: str = "gemini-3.6-flash"     # matches the Recruitment module
+    # "*-lite" models have a much larger free-tier daily quota than full flash.
+    gemini_model: str = "gemini-flash-lite-latest"
+    gemini_max_retries: int = 2               # retry transient 429 (per-minute) / 503
     analysis_max_transcript_chars: int = 24_000
 
     model_config = SettingsConfigDict(

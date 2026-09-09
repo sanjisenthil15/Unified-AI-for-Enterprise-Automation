@@ -290,6 +290,58 @@ def test_real_pipeline_completes_with_faked_stages(client, new_user, monkeypatch
 
 
 # --------------------------------------------------------------------------- #
+# reprocess (retry a failed meeting)
+# --------------------------------------------------------------------------- #
+def test_reprocess_resumes_and_reruns_only_pending_stages(client, new_user, monkeypatch):
+    calls = []
+    state = {"analysis_ok": False}
+    # audio + transcription + diarization "already done"; analysis fails then succeeds
+    monkeypatch.setattr(pipeline_mod, "_stage_done",
+                        lambda db, mid, name: name != "analysis")
+
+    def audio(db, mid): calls.append("audio")
+    def stt(db, mid): calls.append("stt")
+    def diar(db, mid): calls.append("diar")
+    def analysis(db, mid):
+        calls.append("analysis")
+        if not state["analysis_ok"]:
+            raise HTTPException(502, "Gemini quota / rate limit exceeded")
+
+    monkeypatch.setattr(pipeline_mod, "extract_meeting_audio", audio)
+    monkeypatch.setattr(pipeline_mod, "transcribe_meeting", stt)
+    monkeypatch.setattr(pipeline_mod, "diarize_meeting", diar)
+    monkeypatch.setattr(pipeline_mod, "analyze_meeting", analysis)
+
+    u = new_user()
+    mid = _upload(client, u["headers"]).json()["id"]  # first run: all 4 stages, fails at analysis
+    assert client.get(f"/api/v1/meetings/{mid}", headers=u["headers"]).json()["status"] == "failed"
+    assert calls == ["audio", "stt", "diar", "analysis"]
+
+    calls.clear()
+    state["analysis_ok"] = True
+    r = client.post(f"/api/v1/meetings/{mid}/reprocess", headers=u["headers"])
+    assert r.status_code == 200
+    assert client.get(f"/api/v1/meetings/{mid}", headers=u["headers"]).json()["status"] == "completed"
+    assert calls == ["analysis"]  # resume skipped audio/stt/diar
+
+
+def test_reprocess_requires_ownership(client, new_user, pipeline):
+    pipeline("failure")
+    owner, other = new_user("Owner"), new_user("Other")
+    mid = _upload(client, owner["headers"]).json()["id"]
+    assert client.post(f"/api/v1/meetings/{mid}/reprocess", headers=other["headers"]).status_code == 404
+
+
+def test_reprocess_conflict_while_processing(client, new_user, monkeypatch):
+    monkeypatch.setattr("modules.meeting_intelligence.router.run_meeting_pipeline",
+                        lambda mid, **kw: None)  # leaves status = pending
+    u = new_user()
+    mid = _upload(client, u["headers"]).json()["id"]
+    r = client.post(f"/api/v1/meetings/{mid}/reprocess", headers=u["headers"])
+    assert r.status_code == 409
+
+
+# --------------------------------------------------------------------------- #
 # no internal details leak
 # --------------------------------------------------------------------------- #
 def test_responses_never_expose_storage_paths(client, new_user, pipeline):

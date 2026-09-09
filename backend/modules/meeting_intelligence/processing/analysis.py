@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
@@ -162,28 +163,64 @@ class AnalysisProvider(ABC):
         ...
 
 
+_RETRY_DELAY_RE = re.compile(r"retry(?:Delay|\s+in)['\":\s]+([0-9.]+)s", re.IGNORECASE)
+
+
+def _is_retryable(message: str) -> bool:
+    if "503" in message or "UNAVAILABLE" in message:
+        return True
+    # 429 is retryable only when it's a short per-minute throttle, not the daily cap.
+    return "429" in message and "PerDay" not in message and "per day" not in message.lower()
+
+
 class GeminiAnalysisProvider(AnalysisProvider):
     name = "gemini"
 
-    def __init__(self, *, api_key: str | None = None, model: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        model: str | None = None,
+        max_retries: int | None = None,
+    ) -> None:
         self.api_key = settings.GEMINI_API_KEY if api_key is None else api_key
         self.model = model or meeting_settings.gemini_model
+        self.max_retries = (
+            meeting_settings.gemini_max_retries if max_retries is None else max_retries
+        )
 
     def analyze(self, transcript_text: str) -> AnalysisResult:
         if not self.api_key or not self.api_key.strip():
             raise AnalysisError("GEMINI_API_KEY is not configured.", kind="config")
-        try:
-            from google import genai
 
-            client = genai.Client(api_key=self.api_key)
-            response = client.models.generate_content(
-                model=self.model, contents=build_prompt(transcript_text),
-            )
-            raw = (getattr(response, "text", "") or "").strip()
-        except AnalysisError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            raise AnalysisError(f"Gemini API error: {exc}", kind="api") from exc
+        prompt = build_prompt(transcript_text)
+        attempt = 0
+        while True:
+            try:
+                from google import genai
+
+                client = genai.Client(api_key=self.api_key)
+                response = client.models.generate_content(model=self.model, contents=prompt)
+                raw = (getattr(response, "text", "") or "").strip()
+                break
+            except AnalysisError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                message = str(exc)
+                if attempt < self.max_retries and _is_retryable(message):
+                    attempt += 1
+                    m = _RETRY_DELAY_RE.search(message)
+                    delay = min(float(m.group(1)) if m else 5.0, 20.0)
+                    time.sleep(delay)
+                    continue
+                if "429" in message or "RESOURCE_EXHAUSTED" in message:
+                    raise AnalysisError(
+                        f"Gemini quota / rate limit exceeded for model '{self.model}'. "
+                        f"Retry later, or set MEETING_GEMINI_MODEL to a model with "
+                        f"remaining quota (e.g. gemini-3.7-flash).",
+                        kind="api",
+                    ) from exc
+                raise AnalysisError(f"Gemini API error: {exc}", kind="api") from exc
 
         data = parse_json_response(raw)
         return result_from_dict(data, provider=self.name, model=self.model)

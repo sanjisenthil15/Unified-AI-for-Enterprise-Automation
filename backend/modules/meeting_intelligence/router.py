@@ -29,6 +29,7 @@ from fastapi import (
     Depends,
     File,
     Form,
+    HTTPException,
     UploadFile,
     status,
 )
@@ -166,6 +167,31 @@ def get_action_items(
 ):
     service.get_owned_meeting(db, meeting_id, current_user.id)
     return service.list_meeting_action_items(db, meeting_id)
+
+
+@router.post(
+    "/{meeting_id}/reprocess",
+    response_model=MeetingResponse,
+    summary="Re-run processing for a failed/completed meeting (resumes from the failed stage)",
+)
+def reprocess_meeting(
+    meeting_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    meeting = service.get_owned_meeting(db, meeting_id, current_user.id)
+    if meeting.status not in ("failed", "completed"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Meeting is '{meeting.status}' — wait for the current run to finish.",
+        )
+    meeting.status = "pending"
+    meeting.error_message = None
+    db.commit()
+    db.refresh(meeting)
+    background_tasks.add_task(run_meeting_pipeline, meeting.id, resume=True)
+    return meeting
 
 
 @router.delete(

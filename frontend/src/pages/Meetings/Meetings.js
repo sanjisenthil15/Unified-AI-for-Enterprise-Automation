@@ -25,6 +25,7 @@ import {
   getMeeting,
   getTranscript,
   listMeetings,
+  reprocessMeeting,
 } from '../../api/meetingApi';
 import {
   apiErrorMessage,
@@ -91,7 +92,8 @@ export default function Meetings() {
         const m = await getMeeting(id);
         setDetail(m);
         setDetailError('');
-        if (m.status === 'completed') await loadResults(id);
+        // load whatever results exist (a failed meeting may still have a transcript)
+        if (m.status === 'completed' || m.status === 'failed') await loadResults(id);
       } catch (err) {
         setDetailError(apiErrorMessage(err, 'Could not load this meeting.'));
       }
@@ -148,6 +150,17 @@ export default function Meetings() {
     }
   }
 
+  async function handleRetry() {
+    if (!selectedId) return;
+    try {
+      const m = await reprocessMeeting(selectedId);
+      setDetail(m); // status = pending -> polling resumes via the effect
+      setDetailError('');
+    } catch (err) {
+      setDetailError(apiErrorMessage(err, 'Could not restart processing.'));
+    }
+  }
+
   // ---------------- render ----------------
   return (
     <div className="module-page mi-page">
@@ -173,6 +186,7 @@ export default function Meetings() {
           deleting={deleting}
           onBack={backToList}
           onDelete={handleDelete}
+          onRetry={handleRetry}
         />
       ) : (
         <>
@@ -207,9 +221,10 @@ export default function Meetings() {
 
 function MeetingDetail({
   detail, detailLoading, detailError, transcript, analysis, actionItems,
-  deleting, onBack, onDelete,
+  deleting, onBack, onDelete, onRetry,
 }) {
   const badge = detail ? statusBadge(detail.status) : null;
+  const canRetry = detail && (detail.status === 'failed' || detail.status === 'completed');
 
   return (
     <>
@@ -232,6 +247,11 @@ function MeetingDetail({
             </div>
             <div className="mi-detail-actions">
               <span className={`badge ${badge.badge}`}>{badge.label}</span>
+              {canRetry && (
+                <button className="mi-btn mi-btn-ghost mi-btn-sm" onClick={onRetry}>
+                  {detail.status === 'failed' ? 'Retry processing' : 'Re-process'}
+                </button>
+              )}
               <button
                 className="mi-btn mi-btn-danger mi-btn-sm"
                 onClick={onDelete}
@@ -253,16 +273,13 @@ function MeetingDetail({
           {detail.status === 'failed' && (
             <div className="mi-error" role="alert">
               Processing failed: {detail.error_message || 'unknown error'}
+              {' '}Anything below already completed — use “Retry processing” to run the rest.
             </div>
           )}
 
-          {detail.status === 'completed' && (
-            <>
-              <SummaryPanel analysis={analysis} />
-              <TranscriptViewer transcript={transcript} />
-              <ActionItemList items={actionItems} />
-            </>
-          )}
+          {analysis && <SummaryPanel analysis={analysis} />}
+          {transcript && <TranscriptViewer transcript={transcript} />}
+          {analysis && <ActionItemList items={actionItems} />}
         </>
       )}
     </>
