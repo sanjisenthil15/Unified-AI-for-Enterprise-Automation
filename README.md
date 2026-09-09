@@ -36,6 +36,13 @@ alembic upgrade head             # create/upgrade all tables
 uvicorn main:app --reload        # http://127.0.0.1:8000/docs
 ```
 
+Optional — offline speaker-diarization stack for Meeting Intelligence
+(the app runs without it; diarization falls back to a single speaker):
+```bash
+pip install -r requirements-ml.txt
+pip install --no-deps resemblyzer==0.1.4
+```
+
 ### 3. Frontend
 ```bash
 cd frontend
