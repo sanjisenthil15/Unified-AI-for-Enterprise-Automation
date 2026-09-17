@@ -33,6 +33,7 @@ import models  # noqa: F401
 # ------------------------------------------------------------------ #
 from auth.router import router as auth_router
 from modules.meeting_intelligence.router import router as meeting_router
+from modules.meeting_online.router import router as online_meeting_router
 from modules.recruitment.router import router as recruitment_router
 
 # ------------------------------------------------------------------ #
@@ -70,6 +71,8 @@ API_PREFIX = "/api/v1"
 
 app.include_router(auth_router,        prefix=API_PREFIX)
 app.include_router(recruitment_router, prefix=API_PREFIX)
+# Static /meetings/online routes precede offline /meetings/{meeting_id}.
+app.include_router(online_meeting_router, prefix=API_PREFIX)
 app.include_router(meeting_router,     prefix=API_PREFIX)
 # Future modules will be registered here, for example:
 # app.include_router(employee_router,  prefix=API_PREFIX)
