@@ -1,0 +1,30 @@
+.online-page .online-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.online-page .online-toolbar h2 { margin: 0; margin-right: auto; }
+.online-page .online-form { display: grid; gap: 12px; }
+.online-page .online-form input,
+.online-page .online-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-primary, #101827);
+  color: var(--text-primary, #e5e7eb);
+  border: 1px solid var(--border-color, #475569);
+  border-radius: 8px;
+  padding: 12px;
+  font: inherit;
+}
+.online-page .online-form button { justify-self: start; }
+.online-page .online-id { overflow-wrap: anywhere; font-family: monospace; }
+.online-page .online-microphone { margin-bottom: 24px; }
+.online-page .online-transcript { max-height: 420px; overflow-y: auto; }
+.online-page .online-transcript article { border-bottom: 1px solid #475569; padding: 12px 0; }
+.online-page .online-transcript p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.online-page .online-transcript small { margin-left: 10px; opacity: 0.75; }
+.online-page a.mi-btn { text-decoration: none; }
+.online-page button:disabled { opacity: 0.5; cursor: not-allowed; }
+.online-page :focus-visible { outline: 2px solid #22d3ee; outline-offset: 3px; }
