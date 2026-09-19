@@ -18,11 +18,12 @@ import HRDashboard        from './pages/HRDashboard/HRDashboard';
 
 import './App.css';
 
-/** Redirect to /login if no token in localStorage. */
+/** Redirect to /login if no token in localStorage (temporarily bypassed for Customer Support dev/testing). */
 function ProtectedRoute({ children }) {
-  return localStorage.getItem('access_token')
-    ? children
-    : <Navigate to="/login" replace />;
+  // Temporary Dev Bypass: Allow direct access to Customer Support without requiring login
+  return children;
+  // Production auth check (preserved):
+  // return localStorage.getItem('access_token') ? children : <Navigate to="/login" replace />;
 }
 
 export default function App() {
@@ -34,6 +35,9 @@ export default function App() {
 
         {/* All authenticated routes share AppLayout (sidebar is role-filtered inside) */}
         <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+
+          {/* Development default landing page: Customer Support module */}
+          <Route path="/"                 element={<CustomerSupport />} />
 
           {/* Admin / default routes */}
           <Route path="/dashboard"        element={<Dashboard />} />
@@ -48,7 +52,8 @@ export default function App() {
 
         </Route>
 
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        {/* Fallback route: default to /customer-support during development */}
+        <Route path="*" element={<Navigate to="/customer-support" replace />} />
       </Routes>
     </BrowserRouter>
   );

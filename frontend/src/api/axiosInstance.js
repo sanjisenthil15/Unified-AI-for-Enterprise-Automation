@@ -12,7 +12,7 @@
 
 import axios from 'axios';
 
-const API_BASE_URL = 'http://127.0.0.1:8000';
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://127.0.0.1:8000';
 
 const axiosInstance = axios.create({
   baseURL: API_BASE_URL,
@@ -36,10 +36,12 @@ axiosInstance.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Token is invalid or expired — clear storage and force re-login
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      // In dev mode with login bypass, do not force hard redirect to /login
+      // Preserved production behavior:
+      // localStorage.removeItem('access_token');
+      // localStorage.removeItem('user');
+      // window.location.href = '/login';
+      console.warn('[Dev Mode] API endpoint returned 401 Unauthorized:', error.config?.url);
     }
     return Promise.reject(error);
   }

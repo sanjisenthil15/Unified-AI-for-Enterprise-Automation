@@ -126,36 +126,146 @@ CREATE TABLE employee_ai_insights (
 -- 3. CUSTOMER SUPPORT AI
 -- =============================================================================
 
-CREATE TABLE support_categories (
-    id      SMALLINT UNSIGNED   NOT NULL AUTO_INCREMENT,
-    name    VARCHAR(80)         NOT NULL,
+CREATE TABLE support_teams (
+    id          SMALLINT UNSIGNED   NOT NULL AUTO_INCREMENT,
+    name        VARCHAR(100)        NOT NULL,
+    code        VARCHAR(50)         NOT NULL,
+    description VARCHAR(255)        NULL,
+    is_active   TINYINT(1)          NOT NULL DEFAULT 1,
+    created_at  DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    UNIQUE KEY uq_sc_name (name)
+    UNIQUE KEY uq_st_name (name),
+    UNIQUE KEY uq_st_code (code)
 ) ENGINE=InnoDB;
 
-CREATE TABLE support_tickets (
+CREATE TABLE support_categories (
+    id              SMALLINT UNSIGNED   NOT NULL AUTO_INCREMENT,
+    name            VARCHAR(80)         NOT NULL,
+    description     VARCHAR(255)        NULL,
+    default_team_id SMALLINT UNSIGNED   NULL,
+    created_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_sc_name (name),
+    INDEX idx_sc_team (default_team_id),
+    CONSTRAINT fk_sc_team
+        FOREIGN KEY (default_team_id) REFERENCES support_teams (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE knowledge_documents (
     id              BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT,
+    title           VARCHAR(255)        NOT NULL,
     category_id     SMALLINT UNSIGNED   NULL,
-    submitted_by    BIGINT UNSIGNED     NOT NULL,           -- FK → users
-    assigned_to     BIGINT UNSIGNED     NULL,               -- FK → users (support agent)
-    subject         VARCHAR(255)        NOT NULL,
-    description     TEXT                NOT NULL,
-    priority        ENUM('low','medium','high','critical')
-                                        NOT NULL DEFAULT 'medium',
-    status          ENUM('open','in_progress','resolved','closed','escalated')
-                                        NOT NULL DEFAULT 'open',
-    channel         ENUM('web','email','chat','api')
-                                        NOT NULL DEFAULT 'web',
-    resolved_at     DATETIME            NULL,
+    doc_type        ENUM('faq','product_guide','billing_policy','troubleshooting','auth_procedure','general_policy')
+                                        NOT NULL DEFAULT 'faq',
+    content         LONGTEXT            NOT NULL,
+    is_published    TINYINT(1)          NOT NULL DEFAULT 1,
+    created_by      BIGINT UNSIGNED     NULL,
     created_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    INDEX idx_st_status   (status),
-    INDEX idx_st_priority (priority),
+    INDEX idx_kd_category  (category_id),
+    INDEX idx_kd_published (is_published),
+    INDEX idx_kd_title     (title),
+    CONSTRAINT fk_kd_category
+        FOREIGN KEY (category_id) REFERENCES support_categories (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_kd_creator
+        FOREIGN KEY (created_by) REFERENCES users (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE knowledge_chunks (
+    id              BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT,
+    document_id     BIGINT UNSIGNED     NOT NULL,
+    chunk_index     INT UNSIGNED        NOT NULL,
+    chunk_text      TEXT                NOT NULL,
+    keywords        VARCHAR(255)        NULL,
+    created_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_kc_doc (document_id),
+    CONSTRAINT fk_kc_doc
+        FOREIGN KEY (document_id) REFERENCES knowledge_documents (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE chat_sessions (
+    id              VARCHAR(64)         NOT NULL,
+    user_id         BIGINT UNSIGNED     NULL,
+    customer_name   VARCHAR(120)        NULL,
+    customer_email  VARCHAR(255)        NULL,
+    status          ENUM('active','resolved','escalated')
+                                        NOT NULL DEFAULT 'active',
+    created_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_cs_user   (user_id),
+    INDEX idx_cs_status (status),
+    INDEX idx_cs_email  (customer_email),
+    CONSTRAINT fk_cs_user
+        FOREIGN KEY (user_id) REFERENCES users (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE chat_messages (
+    id                  BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT,
+    session_id          VARCHAR(64)         NOT NULL,
+    sender_type         ENUM('customer','ai','agent') NOT NULL,
+    sender_id           BIGINT UNSIGNED     NULL,
+    message             TEXT                NOT NULL,
+    retrieved_context   TEXT                NULL,
+    confidence_score    FLOAT               NULL,
+    is_escalated        TINYINT(1)          NOT NULL DEFAULT 0,
+    created_at          DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_cm_session (session_id),
+    INDEX idx_cm_sender  (sender_id),
+    CONSTRAINT fk_cm_session
+        FOREIGN KEY (session_id) REFERENCES chat_sessions (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_cm_sender
+        FOREIGN KEY (sender_id) REFERENCES users (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE support_tickets (
+    id                  BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT,
+    session_id          VARCHAR(64)         NULL,
+    category_id         SMALLINT UNSIGNED   NULL,
+    team_id             SMALLINT UNSIGNED   NULL,
+    submitted_by        BIGINT UNSIGNED     NOT NULL,           -- FK → users
+    assigned_to         BIGINT UNSIGNED     NULL,               -- FK → users (support agent)
+    customer_name       VARCHAR(120)        NULL,
+    customer_email      VARCHAR(255)        NULL,
+    subject             VARCHAR(255)        NOT NULL,
+    description         TEXT                NOT NULL,
+    priority            ENUM('low','medium','high','critical')
+                                            NOT NULL DEFAULT 'medium',
+    status              ENUM('open','assigned','in_progress','waiting_for_customer','resolved','closed','escalated')
+                                            NOT NULL DEFAULT 'open',
+    channel             ENUM('web','email','chat','api')
+                                            NOT NULL DEFAULT 'chat',
+    escalation_reason   VARCHAR(255)        NULL,
+    ai_summary          TEXT                NULL,
+    resolved_at         DATETIME            NULL,
+    created_at          DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_st_status    (status),
+    INDEX idx_st_priority  (priority),
     INDEX idx_st_submitter (submitted_by),
     INDEX idx_st_assignee  (assigned_to),
+    INDEX idx_st_category  (category_id),
+    INDEX idx_st_team      (team_id),
+    INDEX idx_st_session   (session_id),
+    CONSTRAINT fk_st_session
+        FOREIGN KEY (session_id) REFERENCES chat_sessions (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
     CONSTRAINT fk_st_category
         FOREIGN KEY (category_id) REFERENCES support_categories (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_st_team
+        FOREIGN KEY (team_id) REFERENCES support_teams (id)
         ON UPDATE CASCADE ON DELETE SET NULL,
     CONSTRAINT fk_st_submitter
         FOREIGN KEY (submitted_by) REFERENCES users (id)
