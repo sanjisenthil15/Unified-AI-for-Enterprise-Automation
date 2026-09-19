@@ -12,3 +12,4 @@ from models.role        import Role        # noqa: F401
 from models.user        import User        # noqa: F401
 from models.job_posting import JobPosting  # noqa: F401
 from models.resume      import Resume      # noqa: F401
+from models.incident    import Incident, IncidentTimeline, IncidentAITriage  # noqa: F401

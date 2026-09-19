@@ -33,6 +33,7 @@ import models  # noqa: F401 — triggers models/__init__.py which imports Role, 
 # ------------------------------------------------------------------ #
 from auth.router import router as auth_router
 from modules.recruitment.router import router as recruitment_router
+from modules.incident_management.router import router as incident_router
 
 # ------------------------------------------------------------------ #
 # Application instance
@@ -69,6 +70,7 @@ API_PREFIX = "/api/v1"
 
 app.include_router(auth_router,        prefix=API_PREFIX)
 app.include_router(recruitment_router, prefix=API_PREFIX)
+app.include_router(incident_router,    prefix=API_PREFIX)
 # Future modules will be registered here, for example:
 # app.include_router(employee_router,  prefix=API_PREFIX)
 # app.include_router(incident_router,  prefix=API_PREFIX)
