@@ -21,9 +21,10 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.7
       - key: DATABASE_URL
-        fromDatabase:
-          name: enterprise-db
-          property: connectionString
+        sync: false # set by hand — currently a Supabase connection string;
+        # was originally fromDatabase: enterprise-db (Render's own free
+        # Postgres, which expires after 30 days). Left as sync:false so
+        # future deploys never silently reset it back to that database.
       - key: SECRET_KEY
         generateValue: true
       - key: ALGORITHM
