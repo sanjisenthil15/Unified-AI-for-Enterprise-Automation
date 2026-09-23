@@ -1,0 +1,61 @@
+# Render Blueprint — provisions the database, backend, and frontend together.
+# Deploy: Render dashboard -> New + -> Blueprint -> connect this repo.
+# Docs: https://render.com/docs/blueprint-spec
+
+databases:
+  - name: enterprise-db
+    plan: free
+    databaseName: enterprise_ai
+    user: enterprise
+
+services:
+  - type: web
+    name: enterprise-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: enterprise-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      - key: AUTH_DISABLED
+        value: "false"
+      - key: DEBUG
+        value: "false"
+      - key: CORS_ORIGINS
+        sync: false # after first deploy: paste the frontend's URL here, e.g.
+        # https://enterprise-frontend.onrender.com (Render's fromService
+        # only exposes bare host/port, not a scheme, so this is set by hand)
+      - key: GEMINI_API_KEY
+        sync: false # set once in the Render dashboard — never commit real keys
+      - key: MEETING_GEMINI_MODEL
+        value: gemini-flash-lite-latest
+      - key: MEETING_WHISPER_LANGUAGE
+        value: en
+
+  - type: web
+    name: enterprise-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: build
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: REACT_APP_API_BASE_URL
+        sync: false # after first deploy: paste the backend's URL here, e.g.
+        # https://enterprise-backend.onrender.com (same reason as above)
+      - key: REACT_APP_AUTH_DISABLED
+        value: "false"

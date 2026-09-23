@@ -42,7 +42,7 @@ def fake_transcriber(data, mime):
 def client(monkeypatch):
     instance = OnlineMeetingService(fake_transcriber, fake_analysis)
     monkeypatch.setattr(router, "service", instance)
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1, full_name="Owner One")
     with TestClient(app) as client:
         yield client
     app.dependency_overrides.clear()
@@ -93,20 +93,23 @@ def test_create_idempotent_duplicate_invalid_and_owner(client):
     assert client.get(f"{BASE}/missing").status_code == 404
     assert client.post(f"{BASE}/missing/end").status_code == 404
     assert client.get(f"{BASE}/{mid}").json()["status"] == "active"
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=2)
-    assert client.get(f"{BASE}/{mid}").status_code == 404
+    # A different authenticated user is not the owner, but can still view
+    # status and get a join ticket — anyone with the link may join. Only
+    # ending the meeting stays owner-only.
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=2, full_name="Guest Two")
+    assert client.get(f"{BASE}/{mid}").status_code == 200
     assert client.post(f"{BASE}/{mid}/end").status_code == 404
-    assert client.post(f"{BASE}/{mid}/ws-ticket").status_code == 404
+    assert client.post(f"{BASE}/{mid}/ws-ticket").status_code == 200
 
 
 def test_transcript_analysis_decisions_actions_end(client):
     mid = start(client)
     ticket, cid = connect(client, mid)
     with client.websocket_connect(f"{BASE}/{mid}/ws") as ws:
-        assert join(ws, ticket, cid)["speaker"] == "Speaker 1"
+        assert join(ws, ticket, cid)["speaker"] == "Owner One"
         event = text_event()
         ws.send_json(event)
-        assert receive(ws, "transcript")["speaker"] == "Speaker 1"
+        assert receive(ws, "transcript")["speaker"] == "Owner One"
         result = receive(ws, "analysis")
         assert result["action_items"][0]["assignee"] == "Speaker 1"
         assert receive(ws, "decision")["description"] == "Deliver Friday"
@@ -140,16 +143,20 @@ def test_speakers_disconnect_reconnect_leave(client):
     mid = start(client)
     ticket, cid = connect(client, mid)
     with client.websocket_connect(f"{BASE}/{mid}/ws") as ws:
-        assert join(ws, ticket, cid)["speaker"] == "Speaker 1"
+        assert join(ws, ticket, cid)["speaker"] == "Owner One"
+    # A second, distinct real account joins the same meeting via the link.
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=2, full_name="Guest Two")
     ticket2, cid2 = connect(client, mid)
     with client.websocket_connect(f"{BASE}/{mid}/ws") as ws:
-        assert join(ws, ticket2, cid2)["speaker"] == "Speaker 2"
+        assert join(ws, ticket2, cid2)["speaker"] == "Guest Two"
         ws.send_json({"type": "leave"})
         with pytest.raises(WebSocketDisconnect):
             ws.receive_json()
+    # The owner reconnects (same account, same client_id) and keeps their name.
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1, full_name="Owner One")
     ticket3, _ = connect(client, mid, cid)
     with client.websocket_connect(f"{BASE}/{mid}/ws") as ws:
-        assert join(ws, ticket3, cid)["speaker"] == "Speaker 1"
+        assert join(ws, ticket3, cid)["speaker"] == "Owner One"
         people = client.get(f"{BASE}/{mid}").json()["participants"]
         assert people[0]["connected"]
         assert not people[1]["connected"]

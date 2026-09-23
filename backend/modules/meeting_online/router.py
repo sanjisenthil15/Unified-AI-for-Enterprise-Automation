@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
+from config.settings import settings
 from core.dependencies import get_current_user
 from modules.meeting_online.schemas import ClientEvent, OnlineMeetingSession, StartMeeting
 from modules.meeting_online.service import service
@@ -28,7 +29,9 @@ async def start_meeting(payload: StartMeeting, user=Depends(get_current_user)):
 
 @router.get("/{meeting_id}", response_model=OnlineMeetingSession)
 async def status_meeting(meeting_id: str, user=Depends(get_current_user)):
-    return service.get(meeting_id, user.id).view
+    # Any authenticated user with the link may view/join — not just the
+    # creator. Only ending the meeting stays owner-only, below.
+    return service.get(meeting_id).view
 
 
 @router.post("/{meeting_id}/end", response_model=OnlineMeetingSession)
@@ -38,14 +41,15 @@ async def end_meeting(meeting_id: str, user=Depends(get_current_user)):
 
 @router.post("/{meeting_id}/ws-ticket")
 async def websocket_ticket(meeting_id: str, user=Depends(get_current_user)):
-    return service.ticket(meeting_id, user.id)
+    return service.ticket(meeting_id, user.id, user.full_name)
 
 
 @router.websocket("/{meeting_id}/ws")
 async def live_socket(ws: WebSocket, meeting_id: str):
-    # Match the existing development CORS origin. Non-browser API clients may
-    # omit Origin but must still present a ticket. Never place tickets in URLs.
-    if ws.headers.get("origin") not in (None, "http://localhost:3000"):
+    # Match the same allowed origins as CORS (settings.CORS_ORIGINS).
+    # Non-browser API clients may omit Origin but must still present a
+    # ticket. Never place tickets in URLs.
+    if ws.headers.get("origin") not in (None, *settings.cors_origins_list):
         await ws.close(code=1008)
         return
     await ws.accept()
@@ -59,7 +63,8 @@ async def live_socket(ws: WebSocket, meeting_id: str):
             await ws.close(code=1008)
             return
         token = auth.get("ticket")
-        if not isinstance(token, str) or not service.consume_ticket(meeting_id, token):
+        identity = service.consume_ticket(meeting_id, token) if isinstance(token, str) else None
+        if identity is None:
             await ws.close(code=1008)
             return
         state = service.get(meeting_id)
@@ -76,7 +81,7 @@ async def live_socket(ws: WebSocket, meeting_id: str):
                     if cid is not None:
                         raise ValueError("Already joined.")
                     candidate = str(event.client_id)
-                    speaker = await service.join(state, candidate, ws)
+                    speaker = await service.join(state, candidate, ws, identity["full_name"])
                     cid = candidate
                 elif event.type == "ping":
                     await service.send(state, ws, {"type": "pong"})

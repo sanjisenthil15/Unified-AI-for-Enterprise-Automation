@@ -22,9 +22,12 @@ A modular, scalable enterprise web application with a centralized AI Decision En
 
 **Prerequisites:** Python 3.12, Node 18+, and PostgreSQL 16 (or Docker).
 
-Auth is currently **disabled for development** — no login screen, every request
-runs as a seeded admin. (Set `AUTH_DISABLED=false` + `REACT_APP_AUTH_DISABLED=false`
-to turn JWT/RBAC back on; a demo account `demo@demo.com` / `Demo1234` also exists.)
+Real login (JWT + RBAC) is on by default. Sign in with the seeded demo account
+`demo@demo.com` / `Demo1234`, or create your own account at `/register` (each
+person needs their own account to join Online Meetings under their own name).
+For a quick local demo without logging in, set `AUTH_DISABLED=true` +
+`REACT_APP_AUTH_DISABLED=true` — every request then runs as the seeded admin,
+but every browser session shares that one identity.
 
 ### 1. Database
 ```bash
@@ -47,7 +50,7 @@ Edit `backend/.env`:
 DATABASE_URL=postgresql+psycopg://enterprise:enterprise@localhost:5432/enterprise_ai
 SECRET_KEY=any-long-random-string
 GEMINI_API_KEY=your-key        # optional — only the meeting "analysis" step needs it
-AUTH_DISABLED=true
+AUTH_DISABLED=false            # true = skip login, every request runs as the seeded admin
 ```
 
 Optional — real speaker diarization for Meeting Intelligence (adds PyTorch;
@@ -61,12 +64,14 @@ pip install --no-deps resemblyzer==0.1.4
 ```bat
 cd frontend
 npm install
-copy .env.example .env                        :: contains REACT_APP_AUTH_DISABLED=true
+copy .env.example .env
 npm start                                     :: http://localhost:3000
 ```
 
-Open `http://localhost:3000` — it lands straight on the dashboard. Sidebar →
-**HR Recruitment** or **Meetings**.
+Open `http://localhost:3000/login` and sign in (demo account, or `/register`
+to create one). Sidebar → **HR Recruitment** or **Meetings**. For Online
+Meeting, share the session link from the URL bar — anyone with an account can
+open it and join under their own name.
 
 ### Database migrations
 - Apply latest schema:    `cd backend && alembic upgrade head`

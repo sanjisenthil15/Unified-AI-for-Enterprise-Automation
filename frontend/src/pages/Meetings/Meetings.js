@@ -183,6 +183,7 @@ export default function Meetings() {
 
       {selectedId ? (
         <MeetingDetail
+          meetingId={selectedId}
           detail={detail}
           detailLoading={detailLoading}
           detailError={detailError}
@@ -193,6 +194,7 @@ export default function Meetings() {
           onBack={backToList}
           onDelete={handleDelete}
           onRetry={handleRetry}
+          onActionItemsChanged={() => loadResults(selectedId)}
         />
       ) : (
         <>
@@ -226,7 +228,7 @@ export default function Meetings() {
 }
 
 function MeetingDetail({
-  detail, detailLoading, detailError, transcript, analysis, actionItems,
+  meetingId, detail, detailLoading, detailError, transcript, analysis, actionItems, onActionItemsChanged,
   deleting, onBack, onDelete, onRetry,
 }) {
   const badge = detail ? statusBadge(detail.status) : null;
@@ -285,7 +287,9 @@ function MeetingDetail({
 
           {analysis && <SummaryPanel analysis={analysis} />}
           {transcript && <TranscriptViewer transcript={transcript} />}
-          {analysis && <ActionItemList items={actionItems} />}
+          {analysis && (
+            <ActionItemList meetingId={meetingId} items={actionItems} onAssigned={onActionItemsChanged} />
+          )}
         </>
       )}
     </>

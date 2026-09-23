@@ -75,6 +75,7 @@ function LiveSession({ id }) {
   const [microphoneBusy, setMicrophoneBusy] = useState(false);
   const [ending, setEnding] = useState(false);
   const [clock, setClock] = useState(Date.now());
+  const [copied, setCopied] = useState(false);
   useEffect(() => {
     const timer = setInterval(() => setClock(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -103,6 +104,17 @@ function LiveSession({ id }) {
     finally { setEnding(false); }
   }
 
+  async function copyLink() {
+    const link = `${window.location.origin}/meetings/online?session=${id}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Could not copy the link. Copy it from the address bar instead.');
+    }
+  }
+
   function download() {
     const url = URL.createObjectURL(new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' }));
     const anchor = document.createElement('a');
@@ -122,9 +134,11 @@ function LiveSession({ id }) {
         </div>
         <p className="online-id">Session ID: {id}</p>
         <p>{speaker ? `Your label: ${speaker}. ` : ''}
-          Labels identify browser participants, not voices or real people.
-          A shared microphone remains one speaker.</p>
+          Anyone with an account can join from the invite link below.</p>
         <div className="online-toolbar">
+          <button className="mi-btn mi-btn-ghost" onClick={copyLink}>
+            {copied ? 'Link copied!' : '🔗 Copy invite link'}
+          </button>
           {connection === 'ERROR' && <button className="mi-btn mi-btn-primary" onClick={live.reconnect}>Reconnect</button>}
           <button className="mi-btn mi-btn-danger" disabled={!active || ending || microphoneBusy || sending} onClick={end}>
             {ending || session?.status === 'ending' ? 'Finalizing meeting…' : 'End meeting'}
@@ -152,7 +166,15 @@ function LiveSession({ id }) {
       )}
       <section className="content-panel mi-panel">
         <h2>Live transcript <span className="mi-count">{session?.transcript.length || 0}</span></h2>
-        <p className="mi-muted">{session?.participants.filter((p) => p.connected).length || 0} connected browser participants</p>
+        <ul className="online-participants" aria-label="Participants">
+          {(session?.participants || []).map((p) => (
+            <li key={p.client_id} className={p.connected ? 'is-online' : 'is-offline'}>
+              <span className="online-dot" aria-hidden="true" />
+              {p.speaker}{!p.connected && ' (left)'}
+            </li>
+          ))}
+          {!session?.participants?.length && <li className="mi-muted">No participants yet.</li>}
+        </ul>
         <div className="online-transcript" role="log" aria-label="Live transcript" aria-live="polite">
           {session?.transcript.length ? session.transcript.map((segment) => (
             <article key={segment.id}>

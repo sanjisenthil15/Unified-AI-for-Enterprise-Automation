@@ -55,3 +55,25 @@ def test_login_rejects_bad_password(client, unique_email):
 def test_me_requires_token(client):
     r = client.get("/api/v1/auth/me")
     assert r.status_code in (401, 403)
+
+
+def test_roles_is_public(client):
+    r = client.get("/api/v1/auth/roles")
+    assert r.status_code == 200
+    names = {role["name"] for role in r.json()}
+    assert {"admin", "employee"} <= names
+
+
+def test_users_lists_active_accounts(client, unique_email):
+    pw = "Str0ngPass1"
+    client.post("/api/v1/auth/register", json={
+        "full_name": "Pytest User", "email": unique_email, "password": pw, "role_id": 1,
+    })
+    r = client.post("/api/v1/auth/login", json={"email": unique_email, "password": pw})
+    token = r.json()["access_token"]
+
+    r = client.get("/api/v1/auth/users", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200
+    assert unique_email in {u["email"] for u in r.json()}
+
+    assert client.get("/api/v1/auth/users").status_code in (401, 403)

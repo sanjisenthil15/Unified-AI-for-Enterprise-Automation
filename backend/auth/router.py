@@ -16,7 +16,7 @@ auth/service.py (already scaffolded).
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from auth.schemas import Token, UserLogin, UserRegister, UserResponse
+from auth.schemas import RoleResponse, Token, UserLogin, UserRegister, UserResponse
 from config.database import get_db
 from core.dependencies import get_current_user
 from core.security import create_access_token, hash_password, verify_password
@@ -25,6 +25,20 @@ from models.user import User
 
 # All routes in this router are prefixed with /auth
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+
+# ------------------------------------------------------------------ #
+# GET /auth/roles
+# ------------------------------------------------------------------ #
+
+@router.get(
+    "/roles",
+    response_model=list[RoleResponse],
+    summary="List available roles",
+    description="Public listing of roles, used to populate the registration form.",
+)
+def list_roles(db: Session = Depends(get_db)) -> list[Role]:
+    return db.query(Role).order_by(Role.id).all()
 
 
 # ------------------------------------------------------------------ #
@@ -185,3 +199,25 @@ def get_me(
     The hashed_password field is excluded by UserResponse automatically.
     """
     return current_user
+
+
+# ------------------------------------------------------------------ #
+# GET /auth/users
+# ------------------------------------------------------------------ #
+
+@router.get(
+    "/users",
+    response_model=list[UserResponse],
+    summary="List active users",
+    description="Any authenticated user may list active accounts, e.g. to assign a meeting action item.",
+)
+def list_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[User]:
+    return (
+        db.query(User)
+        .filter(User.is_active.is_(True), User.deleted_at.is_(None))
+        .order_by(User.full_name)
+        .all()
+    )

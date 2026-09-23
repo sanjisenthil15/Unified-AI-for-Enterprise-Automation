@@ -6,9 +6,10 @@
  * (status = "pending"); the parent then starts polling for progress.
  */
 
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { ACCEPTED_EXTENSIONS, uploadMeeting } from '../../api/meetingApi';
 import { apiErrorMessage } from './helpers';
+import RecordAudio from './RecordAudio';
 
 const MAX_MB = 1024;
 
@@ -18,21 +19,31 @@ function extensionOf(name) {
 }
 
 export default function AudioUpload({ onUploaded, onCancel }) {
-  const fileRef = useRef(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [meetingDate, setMeetingDate] = useState('');
-  const [fileName, setFileName] = useState('');
+  const [file, setFile] = useState(null);
+  const [recorded, setRecorded] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  function pickFile(picked) {
+    setFile(picked || null);
+    setRecorded(false);
+  }
+
+  function handleRecorded(recordedFile) {
+    setError('');
+    setFile(recordedFile);
+    setRecorded(true);
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
 
-    const file = fileRef.current?.files?.[0];
     if (!title.trim()) return setError('Please enter a meeting title.');
-    if (!file) return setError('Please choose a recording to upload.');
+    if (!file) return setError('Please choose a recording to upload, or record one.');
 
     const ext = extensionOf(file.name);
     if (!ACCEPTED_EXTENSIONS.includes(ext)) {
@@ -50,6 +61,7 @@ export default function AudioUpload({ onUploaded, onCancel }) {
         meetingDate: meetingDate || undefined,
         file,
       });
+      pickFile(null);
       onUploaded?.(meeting);
     } catch (err) {
       setError(apiErrorMessage(err, 'Upload failed. Please try again.'));
@@ -98,13 +110,22 @@ export default function AudioUpload({ onUploaded, onCancel }) {
         <label className="mi-field mi-field-wide">
           <span>Recording <em>*</em></span>
           <input
-            ref={fileRef}
             type="file"
             accept={ACCEPTED_EXTENSIONS.join(',')}
-            onChange={(e) => setFileName(e.target.files?.[0]?.name || '')}
-            disabled={submitting}
+            onChange={(e) => pickFile(e.target.files?.[0])}
+            disabled={submitting || recorded}
           />
-          {fileName && <small className="mi-file-name">{fileName}</small>}
+          <RecordAudio disabled={submitting} onRecorded={handleRecorded} onError={setError} />
+          {file && (
+            <small className="mi-file-name">
+              {recorded ? 'Recorded clip: ' : ''}{file.name}
+              {recorded && (
+                <button type="button" className="mi-btn mi-btn-ghost" onClick={() => pickFile(null)} disabled={submitting}>
+                  Discard
+                </button>
+              )}
+            </small>
+          )}
         </label>
       </div>
 

@@ -1,13 +1,13 @@
 /**
  * modules/meetingIntelligence/ActionItemList.js
  *
- * AI-extracted action items. Read-only for now: the backend has no
- * assignment endpoint yet, so "Assign" is disabled. The data model already
- * supports manual assignment (assigned_to_user_id / assignment_method /
- * due_date) — only the PATCH route is missing.
+ * AI-extracted action items, with manual assignment to a registered user
+ * (PATCH /meetings/{id}/action-items/{itemId}/assign).
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { listUsers } from '../../api/authApi';
+import { assignActionItem } from '../../api/meetingApi';
 import { formatDate } from './helpers';
 
 const ITEM_STATUS_BADGE = {
@@ -17,10 +17,34 @@ const ITEM_STATUS_BADGE = {
   cancelled: 'red',
 };
 
-export default function ActionItemList({ items = [] }) {
+export default function ActionItemList({ meetingId, items = [], onAssigned }) {
+  const [users, setUsers] = useState([]);
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    listUsers().then(setUsers).catch(() => {});
+  }, []);
+
+  async function handleAssign(itemId, userId) {
+    setSaving(true);
+    setError('');
+    try {
+      await assignActionItem(meetingId, itemId, userId ? Number(userId) : null);
+      setEditingId(null);
+      await onAssigned?.();
+    } catch {
+      setError('Could not update the assignment. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <section className="content-panel mi-panel">
       <h2>Action Items <span className="mi-count">{items.length}</span></h2>
+      {error && <div className="mi-error" role="alert">{error}</div>}
 
       {items.length === 0 ? (
         <p className="mi-muted">No action items were extracted from this meeting.</p>
@@ -28,8 +52,11 @@ export default function ActionItemList({ items = [] }) {
         <ul className="mi-action-items">
           {items.map((it) => {
             const badge = ITEM_STATUS_BADGE[it.status] || 'purple';
+            const assignedUser = users.find((u) => u.id === it.assigned_to_user_id);
             const assignee =
-              it.assigned_to_user_id
+              assignedUser
+                ? assignedUser.full_name
+                : it.assigned_to_user_id
                 ? `User #${it.assigned_to_user_id}`
                 : it.assigned_to_employee_id
                 ? `Employee #${it.assigned_to_employee_id}`
@@ -44,7 +71,22 @@ export default function ActionItemList({ items = [] }) {
                   <span className="mi-action-desc">{it.description}</span>
                 </div>
                 <div className="mi-action-meta">
-                  <span>👤 {assignee}</span>
+                  {editingId === it.id ? (
+                    <select
+                      autoFocus
+                      disabled={saving}
+                      value={it.assigned_to_user_id || ''}
+                      onChange={(e) => handleAssign(it.id, e.target.value)}
+                      onBlur={() => setEditingId(null)}
+                    >
+                      <option value="">Unassigned</option>
+                      {users.map((u) => (
+                        <option key={u.id} value={u.id}>{u.full_name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span>👤 {assignee}</span>
+                  )}
                   {it.due_date && <span>📅 {formatDate(it.due_date)}</span>}
                   {it.priority && <span>⚑ {it.priority}</span>}
                   {it.ai_confidence != null && (
@@ -52,14 +94,15 @@ export default function ActionItemList({ items = [] }) {
                       🤖 {Math.round(it.ai_confidence * 100)}%
                     </span>
                   )}
-                  <button
-                    type="button"
-                    className="mi-btn mi-btn-ghost mi-btn-sm"
-                    disabled
-                    title="Manual assignment is coming — the backend endpoint is not built yet."
-                  >
-                    Assign person
-                  </button>
+                  {editingId !== it.id && (
+                    <button
+                      type="button"
+                      className="mi-btn mi-btn-ghost mi-btn-sm"
+                      onClick={() => setEditingId(it.id)}
+                    >
+                      Assign person
+                    </button>
+                  )}
                 </div>
               </li>
             );

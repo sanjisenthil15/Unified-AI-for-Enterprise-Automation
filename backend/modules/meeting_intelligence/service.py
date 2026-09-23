@@ -22,6 +22,7 @@ from models.meeting_analysis import MeetingAnalysis
 from models.meeting_speaker import MeetingSpeaker
 from models.meeting_transcript import MeetingTranscript
 from models.meeting_transcript_segment import MeetingTranscriptSegment
+from models.user import User
 from modules.meeting_intelligence.config import meeting_settings
 from modules.meeting_intelligence.processing.analysis import (
     AnalysisError,
@@ -202,6 +203,28 @@ def list_meeting_action_items(db: Session, meeting_id: int) -> list[MeetingActio
         .order_by(MeetingActionItem.id)
         .all()
     )
+
+
+def assign_action_item(
+    db: Session, meeting_id: int, action_item_id: int, assigned_to_user_id: int | None,
+) -> MeetingActionItem:
+    """Manually assign (or clear) an action item's owner. Caller must already
+    have verified the meeting via get_owned_meeting."""
+    item = (
+        db.query(MeetingActionItem)
+        .filter(MeetingActionItem.id == action_item_id, MeetingActionItem.meeting_id == meeting_id)
+        .first()
+    )
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Action item id={action_item_id} not found.")
+    if assigned_to_user_id is not None:
+        if db.query(User.id).filter(User.id == assigned_to_user_id, User.deleted_at.is_(None)).first() is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"User id={assigned_to_user_id} does not exist.")
+    item.assigned_to_user_id = assigned_to_user_id
+    item.assignment_method = "manual" if assigned_to_user_id is not None else "unassigned"
+    db.commit()
+    db.refresh(item)
+    return item
 
 
 def transcribe_meeting(

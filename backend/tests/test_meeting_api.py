@@ -225,6 +225,40 @@ def test_action_item_retrieval_unassigned(client, new_user, pipeline):
     assert it["source"] == "ai"
 
 
+def test_action_item_assignment(client, new_user, pipeline):
+    pipeline("success")
+    owner = new_user()
+    other = new_user("Someone Else")
+    mid = _upload(client, owner["headers"]).json()["id"]
+    item_id = client.get(f"/api/v1/meetings/{mid}/action-items", headers=owner["headers"]).json()[0]["id"]
+
+    # A non-owner cannot see or touch the meeting at all.
+    assign_url = f"/api/v1/meetings/{mid}/action-items/{item_id}/assign"
+    assert client.patch(assign_url, json={"assigned_to_user_id": other["id"]},
+                        headers=other["headers"]).status_code == 404
+
+    # The owner assigns it to another real user.
+    r = client.patch(assign_url, json={"assigned_to_user_id": other["id"]}, headers=owner["headers"])
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["assigned_to_user_id"] == other["id"]
+    assert body["assignment_method"] == "manual"
+
+    # Assigning to a nonexistent user is rejected.
+    assert client.patch(assign_url, json={"assigned_to_user_id": 999999},
+                        headers=owner["headers"]).status_code == 400
+
+    # Clearing the assignment (null) reverts to unassigned.
+    r = client.patch(assign_url, json={"assigned_to_user_id": None}, headers=owner["headers"])
+    assert r.status_code == 200
+    assert r.json()["assigned_to_user_id"] is None
+    assert r.json()["assignment_method"] == "unassigned"
+
+    # Unknown action item id on a real meeting is 404.
+    assert client.patch(f"/api/v1/meetings/{mid}/action-items/999999/assign",
+                        json={"assigned_to_user_id": other["id"]}, headers=owner["headers"]).status_code == 404
+
+
 # --------------------------------------------------------------------------- #
 # delete
 # --------------------------------------------------------------------------- #

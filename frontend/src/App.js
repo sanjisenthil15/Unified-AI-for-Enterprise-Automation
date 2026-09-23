@@ -7,6 +7,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 import Login              from './pages/Login/Login';
+import Register           from './pages/Login/Register';
 import AppLayout          from './layouts/AppLayout';
 import Dashboard          from './pages/Dashboard/Dashboard';
 import CustomerSupport    from './pages/CustomerSupport/CustomerSupport';
@@ -35,6 +36,7 @@ export default function App() {
       <Routes>
         {/* Public */}
         <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
 
         {/* All authenticated routes share AppLayout (sidebar is role-filtered inside) */}
         <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>

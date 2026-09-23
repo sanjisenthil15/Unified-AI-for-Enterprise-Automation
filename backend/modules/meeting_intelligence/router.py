@@ -43,6 +43,7 @@ from modules.meeting_intelligence.pipeline import run_meeting_pipeline
 from modules.meeting_intelligence.schemas import (
     ActionItemOut,
     AnalysisResponse,
+    AssignActionItem,
     MeetingListItem,
     MeetingResponse,
     SpeakerOut,
@@ -158,7 +159,7 @@ def get_analysis(
 @router.get(
     "/{meeting_id}/action-items",
     response_model=List[ActionItemOut],
-    summary="AI-extracted action items (assigned manually via a later endpoint)",
+    summary="AI-extracted action items",
 )
 def get_action_items(
     meeting_id: int,
@@ -167,6 +168,22 @@ def get_action_items(
 ):
     service.get_owned_meeting(db, meeting_id, current_user.id)
     return service.list_meeting_action_items(db, meeting_id)
+
+
+@router.patch(
+    "/{meeting_id}/action-items/{action_item_id}/assign",
+    response_model=ActionItemOut,
+    summary="Manually assign (or unassign) an action item to a registered user",
+)
+def assign_action_item(
+    meeting_id: int,
+    action_item_id: int,
+    payload: AssignActionItem,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    service.get_owned_meeting(db, meeting_id, current_user.id)
+    return service.assign_action_item(db, meeting_id, action_item_id, payload.assigned_to_user_id)
 
 
 @router.post(

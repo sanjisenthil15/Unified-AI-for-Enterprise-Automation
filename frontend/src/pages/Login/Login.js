@@ -13,7 +13,7 @@
  */
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { loginUser, getCurrentUser } from '../../api/authApi';
 import './Login.css';
 
@@ -29,11 +29,13 @@ const MODULES = [
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [error,    setError]    = useState('');
   const [loading,  setLoading]  = useState(false);
+  const justRegistered = Boolean(location.state?.registered);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -110,6 +112,12 @@ export default function Login() {
           noValidate
           aria-label="Login form"
         >
+          {justRegistered && !error && (
+            <div className="login-success" role="status">
+              Account created — sign in below.
+            </div>
+          )}
+
           {/* Email */}
           <div className="form-group">
             <label htmlFor="email">Email address</label>
@@ -167,6 +175,9 @@ export default function Login() {
           </button>
         </form>
 
+        <p className="login-footer">
+          No account? <Link to="/register">Create one</Link>
+        </p>
         <p className="login-footer">
           © {new Date().getFullYear()} Unified AI Enterprise Platform
         </p>

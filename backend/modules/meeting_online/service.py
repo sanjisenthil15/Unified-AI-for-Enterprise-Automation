@@ -82,18 +82,24 @@ class OnlineMeetingService:
             raise HTTPException(404, "Online meeting not found or expired.")
         return state
 
-    def ticket(self, mid, owner_id):
-        self.get(mid, owner_id)
+    def ticket(self, mid, user_id, full_name):
+        # Any authenticated user who has the (unguessable) meeting id may
+        # request a ticket — joining a meeting you didn't create is the
+        # whole point of sharing a link. Only host actions (end) stay
+        # owner-gated via get(mid, owner_id).
+        self.get(mid)
         self.prune()
         if len(self.tickets) >= 1000:
             raise HTTPException(429, "Too many pending connections.")
         token = secrets.token_urlsafe(32)
-        self.tickets[token] = (mid, time.monotonic() + 30)
+        self.tickets[token] = (mid, time.monotonic() + 30, user_id, full_name)
         return {"ticket": token, "expires_in": 30}
 
     def consume_ticket(self, mid, token):
         value = self.tickets.pop(token, None)
-        return bool(value and value[0] == mid and value[1] > time.monotonic())
+        if not value or value[0] != mid or value[1] <= time.monotonic():
+            return None
+        return {"user_id": value[2], "full_name": value[3]}
 
     async def send(self, state, ws, event):
         async with state.send_lock:
@@ -113,15 +119,18 @@ class OnlineMeetingService:
     async def snapshot(self, state):
         await self.broadcast(state, {"type": "snapshot", "session": state.view.model_dump(mode="json")})
 
-    async def join(self, state, cid, ws):
+    async def join(self, state, cid, ws, display_name=None):
         if cid in state.sockets:
             raise ValueError("This client is already connected in another socket.")
         participant = next((p for p in state.view.participants if p.client_id == cid), None)
         if participant is None:
             if len(state.view.participants) >= 16:
                 raise ValueError("Prototype speaker limit reached (16).")
-            participant = Participant(client_id=cid, speaker=f"Speaker {len(state.view.participants) + 1}")
+            label = display_name or f"Speaker {len(state.view.participants) + 1}"
+            participant = Participant(client_id=cid, speaker=label)
             state.view.participants.append(participant)
+        elif display_name:
+            participant.speaker = display_name
         participant.connected = True
         state.sockets[cid] = ws
         await self.send(state, ws, {"type": "join", "speaker": participant.speaker, "client_id": cid})

@@ -39,7 +39,7 @@ class MeetingSettings(BaseSettings):
     whisper_model: str = "base"          # tiny | base | small | medium | large-v3
     whisper_device: str = "cpu"          # cpu | cuda
     whisper_compute_type: str = "int8"   # int8 | int8_float16 | float16 | float32
-    whisper_language: str | None = None  # None => auto-detect
+    whisper_language: str | None = "en"  # ISO 639-1; None => per-clip auto-detect (unreliable on short clips)
     whisper_beam_size: int = 1           # 1 is fastest on CPU
 
     # --- speaker diarization (pluggable) -------------------------------- #

@@ -129,3 +129,9 @@ class ActionItemOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AssignActionItem(BaseModel):
+    assigned_to_user_id: int | None = Field(
+        None, description="User id to assign this action item to; null to unassign.",
+    )

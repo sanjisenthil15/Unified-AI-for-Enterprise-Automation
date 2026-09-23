@@ -66,6 +66,18 @@ export async function getActionItems(id) {
   return res.data;
 }
 
+/**
+ * PATCH /api/v1/meetings/{id}/action-items/{actionItemId}/assign
+ * @param {number|string} userId - pass null/undefined to unassign
+ */
+export async function assignActionItem(id, actionItemId, userId) {
+  const res = await axiosInstance.patch(
+    `/api/v1/meetings/${id}/action-items/${actionItemId}/assign`,
+    { assigned_to_user_id: userId || null },
+  );
+  return res.data;
+}
+
 export async function reprocessMeeting(id) {
   const res = await axiosInstance.post(`/api/v1/meetings/${id}/reprocess`);
   return res.data;
