@@ -12,6 +12,7 @@ import Dashboard          from './pages/Dashboard/Dashboard';
 import CustomerSupport    from './pages/CustomerSupport/CustomerSupport';
 import IncidentManagement from './pages/IncidentManagement/IncidentManagement';
 import Meetings           from './pages/Meetings/Meetings';
+import OnlineMeeting      from './pages/Meetings/OnlineMeeting';
 import Analytics          from './pages/Analytics/Analytics';
 import HRDashboard        from './pages/HRDashboard/HRDashboard';
 
@@ -43,6 +44,7 @@ export default function App() {
           <Route path="/customer-support" element={<CustomerSupport />} />
           <Route path="/incidents"        element={<IncidentManagement />} />
           <Route path="/meetings"         element={<Meetings />} />
+          <Route path="/meetings/online"  element={<OnlineMeeting />} />
           <Route path="/analytics"        element={<Analytics />} />
 
           {/* HR recruitment — the real module. /recruitment kept as an alias. */}

@@ -1,0 +1,68 @@
+.online-page .online-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.online-page .online-toolbar h2 { margin: 0; margin-right: auto; color: var(--text-primary); }
+.online-page .online-toolbar strong,
+.online-page .online-toolbar span { color: var(--text-primary); }
+.online-page .online-form { display: grid; gap: 12px; }
+.online-page .online-form label { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); }
+
+/* Live input / manual transcript textarea and title input.
+   Use the app's real design tokens (defined in App.css) instead of the
+   previously-undefined --bg-primary / --border-color, which fell back to a
+   near-black background with dark navy text — effectively invisible. */
+.online-page .online-form input,
+.online-page .online-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--surface, #ffffff);
+  color: var(--text-primary, #1e293b);
+  caret-color: var(--text-primary, #1e293b);
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  padding: 12px;
+  font: inherit;
+}
+.online-page .online-form input::placeholder,
+.online-page .online-form textarea::placeholder {
+  color: var(--text-muted, #94a3b8);
+  opacity: 1;
+}
+.online-page .online-form input::selection,
+.online-page .online-form textarea::selection {
+  background: var(--primary-light, #eff6ff);
+  color: var(--text-primary, #1e293b);
+}
+.online-page .online-form input:focus,
+.online-page .online-form textarea:focus {
+  outline: 2px solid var(--primary, #2563eb);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+.online-page .online-form input:disabled,
+.online-page .online-form textarea:disabled {
+  background: var(--bg, #f0f4f8);
+  color: var(--text-muted, #94a3b8);
+  border-color: var(--border, #e2e8f0);
+  cursor: not-allowed;
+  opacity: 1;
+}
+.online-page .online-form button { justify-self: start; }
+.online-page .online-id { overflow-wrap: anywhere; font-family: monospace; color: var(--text-primary); }
+.online-page .online-microphone { margin-bottom: 24px; }
+.online-page .online-microphone p { color: var(--text-secondary); margin-top: 8px; }
+.online-page .online-transcript { max-height: 420px; overflow-y: auto; }
+.online-page .online-transcript article { border-bottom: 1px solid var(--border, #e2e8f0); padding: 12px 0; }
+.online-page .online-transcript article:last-child { border-bottom: none; }
+.online-page .online-transcript strong { color: var(--text-primary); font-weight: 700; }
+.online-page .online-transcript p { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); margin-top: 4px; }
+.online-page .online-transcript small { margin-left: 10px; color: var(--text-muted); opacity: 1; }
+.online-page a.mi-btn { text-decoration: none; }
+.online-page button:disabled { opacity: 0.5; cursor: not-allowed; }
+.online-page :focus-visible { outline: 2px solid var(--primary, #2563eb); outline-offset: 3px; }
+.online-page [role="status"] { color: var(--text-secondary); }
+.online-page [role="alert"] { color: #991b1b; }

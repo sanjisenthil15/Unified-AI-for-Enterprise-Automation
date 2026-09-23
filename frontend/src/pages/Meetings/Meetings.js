@@ -10,6 +10,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import '../Recruitment/Recruitment.css'; // shared .module-page / .content-panel / .badge
 import './Meetings.css';
 
@@ -173,6 +174,11 @@ export default function Meetings() {
             breakdown, summary, decisions and action items.
           </p>
         </div>
+      </div>
+
+      <div className="mi-list-toolbar">
+        <span>Offline Meeting</span>
+        <Link className="mi-btn mi-btn-primary" to="/meetings/online">Open Online Meeting</Link>
       </div>
 
       {selectedId ? (

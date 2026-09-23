@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=True,
+        # Other modules (e.g. modules/meeting_intelligence/config.py) read
+        # module-prefixed keys (MEETING_*) from this same shared .env file.
+        # Without "ignore", pydantic-settings forbids unknown keys and crashes
+        # the whole app at import time as soon as any such key is uncommented.
+        extra="ignore",
     )
 
 
