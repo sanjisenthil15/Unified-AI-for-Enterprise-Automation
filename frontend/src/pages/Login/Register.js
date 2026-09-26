@@ -63,7 +63,15 @@ export default function Register() {
       navigate('/login', { state: { registered: true } });
     } catch (err) {
       const detail = err.response?.data?.detail;
-      setError(typeof detail === 'string' ? detail : 'Could not create the account. Please try again.');
+      if (typeof detail === 'string') {
+        setError(detail);
+      } else if (Array.isArray(detail) && detail.length) {
+        // FastAPI/pydantic validation errors (e.g. weak password) come back
+        // as a list of {msg, loc, ...} objects rather than a plain string.
+        setError(detail.map((d) => d.msg?.replace(/^Value error, /, '') || 'Invalid input').join(' '));
+      } else {
+        setError('Could not create the account. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
