@@ -45,6 +45,8 @@ services:
         value: gemini-flash-lite-latest
       - key: MEETING_WHISPER_LANGUAGE
         value: en
+      - key: MEETING_WHISPER_MODEL
+        value: tiny # "base" is too heavy for the free instance's 512MB RAM / shared CPU
 
   - type: web
     name: enterprise-frontend
