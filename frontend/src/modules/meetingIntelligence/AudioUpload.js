@@ -1,9 +1,9 @@
 /**
  * modules/meetingIntelligence/AudioUpload.js
  *
- * Upload form for a recorded meeting (video or audio file).
- * On success, calls `onUploaded(meeting)` with the created meeting
- * (status = "pending"); the parent then starts polling for progress.
+ * Add a meeting: pick "Record" or "Upload a file" first, then fill in the
+ * shared details. On success, calls `onUploaded(meeting)` with the created
+ * meeting (status = "pending"); the parent then starts polling for progress.
  */
 
 import React, { useState } from 'react';
@@ -19,23 +19,18 @@ function extensionOf(name) {
 }
 
 export default function AudioUpload({ onUploaded, onCancel }) {
+  const [mode, setMode] = useState(null); // null | 'record' | 'upload'
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [meetingDate, setMeetingDate] = useState('');
   const [file, setFile] = useState(null);
-  const [recorded, setRecorded] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  function pickFile(picked) {
-    setFile(picked || null);
-    setRecorded(false);
-  }
-
-  function handleRecorded(recordedFile) {
+  function chooseMode(next) {
+    setMode(next);
+    setFile(null);
     setError('');
-    setFile(recordedFile);
-    setRecorded(true);
   }
 
   async function handleSubmit(e) {
@@ -43,7 +38,7 @@ export default function AudioUpload({ onUploaded, onCancel }) {
     setError('');
 
     if (!title.trim()) return setError('Please enter a meeting title.');
-    if (!file) return setError('Please choose a recording to upload, or record one.');
+    if (!file) return setError(mode === 'record' ? 'Please record a clip first.' : 'Please choose a file to upload.');
 
     const ext = extensionOf(file.name);
     if (!ACCEPTED_EXTENSIONS.includes(ext)) {
@@ -61,7 +56,7 @@ export default function AudioUpload({ onUploaded, onCancel }) {
         meetingDate: meetingDate || undefined,
         file,
       });
-      pickFile(null);
+      setFile(null);
       onUploaded?.(meeting);
     } catch (err) {
       setError(apiErrorMessage(err, 'Upload failed. Please try again.'));
@@ -70,8 +65,33 @@ export default function AudioUpload({ onUploaded, onCancel }) {
     }
   }
 
+  if (!mode) {
+    return (
+      <div className="mi-upload">
+        <h2>Add a meeting</h2>
+        <div className="mi-upload-choice">
+          <button type="button" className="mi-btn mi-btn-primary mi-upload-choice-btn" onClick={() => chooseMode('record')}>
+            🎙 Record a new meeting
+          </button>
+          <button type="button" className="mi-btn mi-btn-primary mi-upload-choice-btn" onClick={() => chooseMode('upload')}>
+            📁 Upload video or audio from device
+          </button>
+        </div>
+        {onCancel && (
+          <div className="mi-upload-actions">
+            <button type="button" className="mi-btn mi-btn-ghost" onClick={onCancel}>Cancel</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <form className="mi-upload" onSubmit={handleSubmit} aria-label="Upload meeting recording">
+    <form className="mi-upload" onSubmit={handleSubmit} aria-label="Add meeting">
+      <button type="button" className="mi-btn mi-btn-ghost" onClick={() => chooseMode(null)} disabled={submitting}>
+        ← choose a different way to add this meeting
+      </button>
+
       <div className="mi-upload-grid">
         <label className="mi-field">
           <span>Meeting title <em>*</em></span>
@@ -107,26 +127,24 @@ export default function AudioUpload({ onUploaded, onCancel }) {
           />
         </label>
 
-        <label className="mi-field mi-field-wide">
-          <span>Recording <em>*</em></span>
-          <input
-            type="file"
-            accept={ACCEPTED_EXTENSIONS.join(',')}
-            onChange={(e) => pickFile(e.target.files?.[0])}
-            disabled={submitting || recorded}
-          />
-          <RecordAudio disabled={submitting} onRecorded={handleRecorded} onError={setError} />
-          {file && (
-            <small className="mi-file-name">
-              {recorded ? 'Recorded clip: ' : ''}{file.name}
-              {recorded && (
-                <button type="button" className="mi-btn mi-btn-ghost" onClick={() => pickFile(null)} disabled={submitting}>
-                  Discard
-                </button>
-              )}
-            </small>
-          )}
-        </label>
+        {mode === 'record' ? (
+          <label className="mi-field mi-field-wide">
+            <span>Recording <em>*</em></span>
+            <RecordAudio disabled={submitting} onRecorded={setFile} onError={setError} />
+            {file && <small className="mi-file-name">Recorded clip: {file.name}</small>}
+          </label>
+        ) : (
+          <label className="mi-field mi-field-wide">
+            <span>File <em>*</em></span>
+            <input
+              type="file"
+              accept={ACCEPTED_EXTENSIONS.join(',')}
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              disabled={submitting}
+            />
+            {file && <small className="mi-file-name">{file.name}</small>}
+          </label>
+        )}
       </div>
 
       {error && <div className="mi-error" role="alert">{error}</div>}

@@ -12,6 +12,7 @@ import AppLayout          from './layouts/AppLayout';
 import Dashboard          from './pages/Dashboard/Dashboard';
 import CustomerSupport    from './pages/CustomerSupport/CustomerSupport';
 import IncidentManagement from './pages/IncidentManagement/IncidentManagement';
+import MeetingsHub        from './pages/Meetings/MeetingsHub';
 import Meetings           from './pages/Meetings/Meetings';
 import OnlineMeeting      from './pages/Meetings/OnlineMeeting';
 import Analytics          from './pages/Analytics/Analytics';
@@ -45,7 +46,8 @@ export default function App() {
           <Route path="/dashboard"        element={<Dashboard />} />
           <Route path="/customer-support" element={<CustomerSupport />} />
           <Route path="/incidents"        element={<IncidentManagement />} />
-          <Route path="/meetings"         element={<Meetings />} />
+          <Route path="/meetings"         element={<MeetingsHub />} />
+          <Route path="/meetings/offline" element={<Meetings />} />
           <Route path="/meetings/online"  element={<OnlineMeeting />} />
           <Route path="/analytics"        element={<Analytics />} />
 

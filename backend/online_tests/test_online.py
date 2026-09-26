@@ -102,6 +102,21 @@ def test_create_idempotent_duplicate_invalid_and_owner(client):
     assert client.post(f"{BASE}/{mid}/ws-ticket").status_code == 200
 
 
+def test_mine_returns_active_meeting_or_404(client):
+    assert client.get(f"{BASE}/mine").status_code == 404
+    mid = start(client)
+    r = client.get(f"{BASE}/mine")
+    assert r.status_code == 200
+    assert r.json()["id"] == mid
+    # A different user has no active meeting of their own.
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=2, full_name="Guest Two")
+    assert client.get(f"{BASE}/mine").status_code == 404
+    # The owner's meeting ending clears it from "mine" too.
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1, full_name="Owner One")
+    client.post(f"{BASE}/{mid}/end")
+    assert client.get(f"{BASE}/mine").status_code == 404
+
+
 def test_transcript_analysis_decisions_actions_end(client):
     mid = start(client)
     ticket, cid = connect(client, mid)

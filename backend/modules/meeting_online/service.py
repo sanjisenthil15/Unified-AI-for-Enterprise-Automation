@@ -75,6 +75,16 @@ class OnlineMeetingService:
         self.sessions[mid] = SessionState(owner_id, str(request.request_id), view)
         return view
 
+    def find_active_for_owner(self, owner_id):
+        """The caller's own non-ended session, if any — lets the frontend
+        resume a session on page load instead of only discovering it as a
+        side effect of a 409 on create()."""
+        self.prune()
+        for state in self.sessions.values():
+            if state.owner_id == owner_id and state.view.status != "ended":
+                return state.view
+        return None
+
     def get(self, mid, owner_id=None):
         self.prune()
         state = self.sessions.get(mid)

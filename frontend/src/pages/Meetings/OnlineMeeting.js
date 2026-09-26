@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { endOnlineMeeting, startOnlineMeeting } from '../../api/onlineMeetingApi';
+import { endOnlineMeeting, getMyActiveOnlineMeeting, startOnlineMeeting } from '../../api/onlineMeetingApi';
 import useLiveMeeting from '../../modules/meetingOnline/useLiveMeeting';
 import MicrophoneInput from '../../modules/meetingOnline/MicrophoneInput';
+import VideoCall from '../../modules/meetingOnline/VideoCall';
 import SummaryPanel from '../../modules/meetingIntelligence/SummaryPanel';
 import { formatTimestamp } from '../../modules/meetingIntelligence/helpers';
 import '../Recruitment/Recruitment.css';
@@ -15,7 +16,22 @@ export default function OnlineMeeting() {
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [checkingResume, setCheckingResume] = useState(!id);
   const request = useRef(null);
+
+  useEffect(() => {
+    if (id) return;
+    let cancelled = false;
+    setCheckingResume(true);
+    getMyActiveOnlineMeeting()
+      .then((active) => {
+        if (cancelled) return;
+        if (active) setParams({ session: active.id });
+        else setCheckingResume(false);
+      })
+      .catch(() => { if (!cancelled) setCheckingResume(false); });
+    return () => { cancelled = true; };
+  }, [id, setParams]);
 
   async function start(event) {
     event.preventDefault();
@@ -45,18 +61,21 @@ export default function OnlineMeeting() {
         <div><h1>Online Meeting</h1><p>Live transcript and meeting intelligence — college prototype.</p></div>
       </div>
       <nav className="online-toolbar" aria-label="Meeting modes">
-        <Link className="mi-btn mi-btn-ghost" to="/meetings">Offline Meeting</Link>
+        <Link className="mi-btn mi-btn-ghost" to="/meetings">← Meeting types</Link>
+        <Link className="mi-btn mi-btn-ghost" to="/meetings/offline">Offline Meeting</Link>
         {id && <Link className="mi-btn mi-btn-ghost" to="/meetings/online">Start / resume meeting</Link>}
       </nav>
       <p className="mi-muted">Sessions are private to your signed-in account (shared demo account in development).
         Results stay in server memory for up to 24 hours after ending; a backend restart clears them.</p>
-      {id ? <LiveSession key={id} id={id} /> : (
+      {id ? <LiveSession key={id} id={id} /> : checkingResume ? (
+        <div className="content-panel mi-panel"><p className="mi-muted">Checking for an active meeting…</p></div>
+      ) : (
         <form className="content-panel mi-panel online-form" onSubmit={start}>
           <h2>Start a live session</h2>
           <label htmlFor="online-title">Meeting title</label>
           <input id="online-title" value={title} onChange={(e) => setTitle(e.target.value)}
             required maxLength={255} placeholder="Project team sync" />
-          <p>Record short microphone clips or enter actual discussion text. Transcript text is sent to the configured AI provider for analysis.</p>
+          <p>Continuously transcribes while you talk, and connects real video/audio via Jitsi Meet.</p>
           {error && <div role="alert" className="mi-error">{error}</div>}
           <button className="mi-btn mi-btn-primary" disabled={busy || !title.trim()}>
             {busy ? 'Starting…' : 'Start meeting'}
@@ -140,7 +159,7 @@ function LiveSession({ id }) {
             {copied ? 'Link copied!' : '🔗 Copy invite link'}
           </button>
           {connection === 'ERROR' && <button className="mi-btn mi-btn-primary" onClick={live.reconnect}>Reconnect</button>}
-          <button className="mi-btn mi-btn-danger" disabled={!active || ending || microphoneBusy || sending} onClick={end}>
+          <button className="mi-btn mi-btn-danger" disabled={!active || ending} onClick={end}>
             {ending || session?.status === 'ending' ? 'Finalizing meeting…' : 'End meeting'}
           </button>
           <button className="mi-btn mi-btn-ghost" disabled={!session} onClick={download}>Download results</button>
@@ -149,9 +168,10 @@ function LiveSession({ id }) {
         {session?.status === 'ended' && <p role="status">Meeting ended. Results are retained temporarily; download them to keep a copy.</p>}
       </div>
       {error && <div className="mi-error" role="alert">{error}</div>}
+      {active && <VideoCall meetingId={id} displayName={speaker} />}
       {active && (
         <section className="content-panel mi-panel">
-          <h2>Live input</h2>
+          <h2>Live transcription</h2>
           <MicrophoneInput disabled={!connected || !active} startedAt={session.started_at}
             sendInput={sendInput} onError={setError} onBusy={setMicrophoneBusy} />
           <form className="online-form" onSubmit={submit}>

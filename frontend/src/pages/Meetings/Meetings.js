@@ -177,6 +177,7 @@ export default function Meetings() {
       </div>
 
       <div className="mi-list-toolbar">
+        <Link className="mi-btn mi-btn-ghost" to="/meetings">← Meeting types</Link>
         <span>Offline Meeting</span>
         <Link className="mi-btn mi-btn-primary" to="/meetings/online">Open Online Meeting</Link>
       </div>

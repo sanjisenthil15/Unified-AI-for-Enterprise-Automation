@@ -16,6 +16,7 @@ To run the server:
     uvicorn main:app --reload --host 0.0.0.0 --port 8000
 """
 
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -46,12 +47,17 @@ async def lifespan(app: FastAPI):
     # A meeting stuck in "pending"/"processing" only means the previous
     # process died mid-run (that background task can't survive a restart) —
     # recover it to "failed" so "Retry processing" can pick it back up,
-    # instead of leaving it stranded forever.
-    db = SessionLocal()
+    # instead of leaving it stranded forever. This is a best-effort cleanup,
+    # not a requirement to serve traffic — a DB hiccup here must never stop
+    # the whole app from starting.
     try:
-        meeting_service.recover_orphaned_meetings(db)
-    finally:
-        db.close()
+        db = SessionLocal()
+        try:
+            meeting_service.recover_orphaned_meetings(db)
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).warning("Startup meeting recovery skipped", exc_info=True)
     yield
 
 

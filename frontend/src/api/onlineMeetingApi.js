@@ -6,6 +6,16 @@ export async function startOnlineMeeting(title, requestId) {
   return (await api.post(BASE, { title, request_id: requestId }, { timeout: 15000 })).data;
 }
 
+/** The caller's own active online meeting, or null if they don't have one. */
+export async function getMyActiveOnlineMeeting() {
+  try {
+    return (await api.get(`${BASE}/mine`, { timeout: 15000 })).data;
+  } catch (err) {
+    if (err.response?.status === 404) return null;
+    throw err;
+  }
+}
+
 export async function getOnlineMeeting(id) {
   return (await api.get(`${BASE}/${encodeURIComponent(id)}`, { timeout: 15000 })).data;
 }

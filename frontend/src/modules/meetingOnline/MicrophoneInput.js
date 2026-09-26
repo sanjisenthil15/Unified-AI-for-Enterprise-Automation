@@ -9,13 +9,29 @@ export function blobToBase64(blob) {
   });
 }
 
+const CLIP_MS = 8000;
+const RETRY_DELAY_MS = 2000;
+
+/**
+ * Continuously transcribes while the meeting is active: records an ~8s
+ * clip, sends it, and immediately starts the next one — no button press
+ * per clip. A Mute toggle is the only manual control, since recording is
+ * now automatic rather than opt-in.
+ */
 export default function MicrophoneInput({ disabled, startedAt, sendInput, onError, onBusy }) {
   const [state, setState] = useState('idle');
+  const [muted, setMuted] = useState(false);
   const recorder = useRef(null);
   const stream = useRef(null);
   const timer = useRef(null);
+  const retryTimer = useRef(null);
   const mounted = useRef(true);
   const cancelled = useRef(false);
+  const mutedRef = useRef(false);
+  const disabledRef = useRef(disabled);
+
+  useEffect(() => { mutedRef.current = muted; }, [muted]);
+  useEffect(() => { disabledRef.current = disabled; }, [disabled]);
 
   function release() {
     clearTimeout(timer.current);
@@ -23,25 +39,41 @@ export default function MicrophoneInput({ disabled, startedAt, sendInput, onErro
     stream.current = null;
   }
 
+  function scheduleNext() {
+    clearTimeout(retryTimer.current);
+    if (disabledRef.current || mutedRef.current || !mounted.current) return;
+    retryTimer.current = setTimeout(() => {
+      if (mounted.current && !disabledRef.current && !mutedRef.current) start();
+    }, RETRY_DELAY_MS);
+  }
+
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       cancelled.current = true;
+      clearTimeout(retryTimer.current);
       if (recorder.current?.state === 'recording') recorder.current.stop();
       release();
     };
   }, []);
 
+  // Start listening as soon as it's enabled; stop when disabled or muted.
   useEffect(() => {
-    if (disabled && recorder.current?.state === 'recording') {
-      cancelled.current = true;
-      recorder.current.stop();
-      release();
+    if (disabled || muted) {
+      clearTimeout(retryTimer.current);
+      if (recorder.current?.state === 'recording') {
+        cancelled.current = true;
+        recorder.current.stop();
+        release();
+      }
+      return;
     }
-  }, [disabled]);
+    if (recorder.current?.state !== 'recording' && state === 'idle') start();
+  }, [disabled, muted]);
 
   async function start() {
+    if (recorder.current?.state === 'recording') return;
     cancelled.current = false;
     setState('permission');
     onBusy(true);
@@ -69,7 +101,8 @@ export default function MicrophoneInput({ disabled, startedAt, sendInput, onErro
         if (mounted.current) {
           setState('idle');
           onBusy(false);
-          onError('Microphone recording failed. Try again or enter text.');
+          onError('Microphone recording failed. Retrying…');
+          scheduleNext();
         }
       };
       current.onstop = async () => {
@@ -84,17 +117,19 @@ export default function MicrophoneInput({ disabled, startedAt, sendInput, onErro
         setState('processing');
         try {
           const blob = new Blob(chunks, { type: mime });
-          if (!blob.size) throw new Error('No audio was recorded.');
-          await sendInput({
-            type: 'audio', data: await blobToBase64(blob),
-            mime_type: mime.split(';')[0], start_ms: startMs, end_ms: endMs,
-          });
+          if (blob.size) {
+            await sendInput({
+              type: 'audio', data: await blobToBase64(blob),
+              mime_type: mime.split(';')[0], start_ms: startMs, end_ms: endMs,
+            });
+          }
         } catch (err) {
           if (mounted.current) onError(err.message);
         } finally {
           if (mounted.current) {
             setState('idle');
             onBusy(false);
+            if (!disabledRef.current && !mutedRef.current) start();
           }
         }
       };
@@ -102,27 +137,29 @@ export default function MicrophoneInput({ disabled, startedAt, sendInput, onErro
       setState('recording');
       timer.current = setTimeout(() => {
         if (current.state === 'recording') current.stop();
-      }, 8000);
+      }, CLIP_MS);
     } catch (err) {
       release();
       if (mounted.current) {
         setState('idle');
         onBusy(false);
         onError(err.name === 'NotAllowedError' ? 'Microphone permission denied. You can still enter transcript text.' : err.message);
+        scheduleNext();
       }
     }
   }
 
   return (
     <div className="online-microphone">
-      <button type="button" className="mi-btn mi-btn-primary"
-        disabled={disabled || state === 'permission' || state === 'processing'}
-        onClick={() => state === 'recording' ? recorder.current.stop() : start()}>
-        {state === 'recording' ? 'Stop and send clip' : state === 'processing'
-          ? 'Transcribing clip…' : state === 'permission' ? 'Waiting for microphone…' : 'Record microphone clip'}
+      <button type="button" className="mi-btn mi-btn-ghost" disabled={disabled}
+        onClick={() => setMuted((m) => !m)}>
+        {muted ? '🔇 Muted — click to resume' : '🔴 Listening — click to mute'}
       </button>
-      <p role="status">{state === 'recording' ? 'Recording — stops automatically after 8 seconds.' :
-        'One clip at a time. Only your microphone is captured, not remote meeting audio. Obtain participant consent.'}</p>
+      <p role="status">
+        {muted ? 'Not transcribing. Click above to resume.'
+          : state === 'processing' ? 'Transcribing the last clip…'
+          : 'Continuously transcribing in ~8s clips while you talk — no button needed.'}
+      </p>
     </div>
   );
 }

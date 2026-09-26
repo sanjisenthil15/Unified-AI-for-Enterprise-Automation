@@ -27,6 +27,16 @@ async def start_meeting(payload: StartMeeting, user=Depends(get_current_user)):
     return service.create(user.id, payload)
 
 
+@router.get("/mine", response_model=OnlineMeetingSession)
+async def my_active_meeting(user=Depends(get_current_user)):
+    # Must be registered before /{meeting_id} — otherwise "mine" would be
+    # captured as a meeting_id path parameter.
+    view = service.find_active_for_owner(user.id)
+    if view is None:
+        raise HTTPException(404, "No active online meeting.")
+    return view
+
+
 @router.get("/{meeting_id}", response_model=OnlineMeetingSession)
 async def status_meeting(meeting_id: str, user=Depends(get_current_user)):
     # Any authenticated user with the link may view/join — not just the

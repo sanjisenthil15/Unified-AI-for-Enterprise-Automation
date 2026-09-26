@@ -78,6 +78,8 @@
 .mi-field textarea:focus { outline: 2px solid var(--primary); outline-offset: -1px; border-color: transparent; }
 .mi-file-name { font-size: 0.8rem; color: var(--text-secondary); }
 .mi-upload-actions { display: flex; gap: 0.6rem; margin-top: 1rem; }
+.mi-upload-choice { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1rem; }
+.mi-upload-choice-btn { flex: 1 1 220px; padding: 1.5rem 1rem; font-size: 1rem; }
 
 /* ---- detail ---- */
 .mi-back {
