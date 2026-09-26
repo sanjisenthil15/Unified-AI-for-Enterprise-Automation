@@ -16,9 +16,12 @@ To run the server:
     uvicorn main:app --reload --host 0.0.0.0 --port 8000
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from config.database import SessionLocal
 from config.settings import settings
 
 # ------------------------------------------------------------------ #
@@ -32,9 +35,25 @@ import models  # noqa: F401
 # are implemented. Only the auth router is active at this stage.
 # ------------------------------------------------------------------ #
 from auth.router import router as auth_router
+from modules.meeting_intelligence import service as meeting_service
 from modules.meeting_intelligence.router import router as meeting_router
 from modules.meeting_online.router import router as online_meeting_router
 from modules.recruitment.router import router as recruitment_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # A meeting stuck in "pending"/"processing" only means the previous
+    # process died mid-run (that background task can't survive a restart) —
+    # recover it to "failed" so "Retry processing" can pick it back up,
+    # instead of leaving it stranded forever.
+    db = SessionLocal()
+    try:
+        meeting_service.recover_orphaned_meetings(db)
+    finally:
+        db.close()
+    yield
+
 
 # ------------------------------------------------------------------ #
 # Application instance
@@ -49,6 +68,7 @@ app = FastAPI(
     docs_url="/docs",       # Swagger UI
     redoc_url="/redoc",     # ReDoc UI
     openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
 # ------------------------------------------------------------------ #

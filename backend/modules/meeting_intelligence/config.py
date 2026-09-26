@@ -35,6 +35,12 @@ class MeetingSettings(BaseSettings):
     audio_channels: int = 1
     audio_filename: str = "audio.wav"
 
+    # --- transcription provider ------------------------------------------ #
+    # "whisper" runs faster-whisper locally (needs real CPU/RAM headroom —
+    # unsuitable for a memory-constrained free-tier host). "gemini" sends
+    # the clip to the Gemini API instead, so nothing heavy runs in-process.
+    transcription_provider: str = "whisper"   # whisper | gemini
+
     # --- offline transcription (faster-whisper) -------------------------- #
     whisper_model: str = "base"          # tiny | base | small | medium | large-v3
     whisper_device: str = "cpu"          # cpu | cuda

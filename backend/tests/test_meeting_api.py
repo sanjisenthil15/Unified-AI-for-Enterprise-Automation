@@ -23,6 +23,7 @@ from models.meeting_speaker import MeetingSpeaker
 from models.meeting_transcript import MeetingTranscript
 from models.meeting_transcript_segment import MeetingTranscriptSegment
 from modules.meeting_intelligence import pipeline as pipeline_mod
+from modules.meeting_intelligence import service
 from modules.meeting_intelligence.processing.audio import get_ffmpeg_exe
 
 WINDOWS = platform.system() == "Windows"
@@ -133,6 +134,33 @@ def test_invalid_upload_type_rejected(client, new_user, pipeline):
     u = new_user()
     r = _upload(client, u["headers"], filename="notes.txt", ctype="text/plain", data=b"hello")
     assert r.status_code == 415
+
+
+def test_recover_orphaned_meetings_marks_stuck_processing_as_failed(client, new_user, pipeline):
+    # No background task ever runs here (pipeline("none")), so this meeting
+    # stays "pending" exactly like one whose process crashed mid-run would.
+    pipeline("none")
+    u = new_user()
+    mid = _upload(client, u["headers"]).json()["id"]
+
+    db = SessionLocal()
+    try:
+        recovered = service.recover_orphaned_meetings(db)
+        assert recovered >= 1
+        meeting = db.get(Meeting, mid)
+        assert meeting.status == "failed"
+        assert "restart" in meeting.error_message.lower()
+    finally:
+        db.close()
+
+    # A completed meeting is untouched.
+    _fake_success(mid)
+    db = SessionLocal()
+    try:
+        assert service.recover_orphaned_meetings(db) == 0
+        assert db.get(Meeting, mid).status == "completed"
+    finally:
+        db.close()
 
 
 # --------------------------------------------------------------------------- #

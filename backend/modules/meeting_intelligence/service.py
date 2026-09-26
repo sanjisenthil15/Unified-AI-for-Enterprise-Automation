@@ -129,6 +129,24 @@ def get_meeting(db: Session, meeting_id: int) -> Meeting:
     return meeting
 
 
+def recover_orphaned_meetings(db: Session) -> int:
+    """
+    Called once at process startup. A meeting stuck in "pending"/"processing"
+    can only mean its background task died with the previous process (that
+    status only exists while a task is actively running in-memory) — mark it
+    failed so "Retry processing" (which only accepts failed/completed) can
+    recover it, instead of leaving it stranded forever. Returns the count
+    recovered.
+    """
+    stuck = db.query(Meeting).filter(Meeting.status.in_(("pending", "processing"))).all()
+    for meeting in stuck:
+        meeting.status = "failed"
+        meeting.error_message = "Processing was interrupted by a server restart. Click Retry to try again."
+    if stuck:
+        db.commit()
+    return len(stuck)
+
+
 def get_owned_meeting(db: Session, meeting_id: int, user_id: int) -> Meeting:
     """
     Fetch a meeting that belongs to `user_id`. A meeting owned by someone else

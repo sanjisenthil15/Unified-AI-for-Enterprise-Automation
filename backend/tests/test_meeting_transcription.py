@@ -213,3 +213,75 @@ def test_faster_whisper_transcribes_real_speech(tmp_path):
     assert result.language == "en"
     assert "friday" in result.text.lower()
     assert result.segments and result.segments[0].end_ms > 0
+
+
+# --------------------------------------------------------------------------- #
+# Gemini transcription provider (used on memory-constrained hosts where
+# self-hosted Whisper can't run — mocked here the same way the analysis
+# provider's Gemini tests are, see tests/test_meeting_analysis.py).
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def gemini_provider(monkeypatch):
+    import modules.meeting_intelligence.processing.transcription as tmod
+    monkeypatch.setattr(tmod.meeting_settings, "transcription_provider", "gemini")
+    monkeypatch.setattr(tmod.settings, "GEMINI_API_KEY", "x")
+    monkeypatch.setattr(tmod.time, "sleep", lambda *_: None)
+    return tmod
+
+
+def test_gemini_transcription_single_segment_success(tmp_path, gemini_provider, monkeypatch):
+    wav = tmp_path / "clip.wav"
+    _write_wav(wav, seconds=3)
+
+    class FakeModels:
+        def generate_content(self, **_):
+            return type("R", (), {"text": "Hello team, let's begin."})()
+
+    class FakeClient:
+        def __init__(self, **_):
+            self.models = FakeModels()
+
+    monkeypatch.setattr("google.genai.Client", FakeClient)
+    result = transcribe_audio(wav)
+
+    assert result.model == "gemini:gemini-flash-lite-latest"
+    assert result.text == "Hello team, let's begin."
+    assert len(result.segments) == 1
+    assert result.segments[0].start_ms == 0
+    assert result.segments[0].end_ms == pytest.approx(3000, abs=50)
+
+
+def test_gemini_transcription_no_speech_returns_empty_segments(tmp_path, gemini_provider, monkeypatch):
+    wav = tmp_path / "silence.wav"
+    _write_wav(wav, seconds=2)
+
+    class FakeModels:
+        def generate_content(self, **_):
+            return type("R", (), {"text": "NO_SPEECH"})()
+
+    class FakeClient:
+        def __init__(self, **_):
+            self.models = FakeModels()
+
+    monkeypatch.setattr("google.genai.Client", FakeClient)
+    result = transcribe_audio(wav)
+
+    assert result.text == ""
+    assert result.segments == []
+
+
+def test_gemini_transcription_retries_then_raises(tmp_path, gemini_provider, monkeypatch):
+    wav = tmp_path / "clip.wav"
+    _write_wav(wav, seconds=1)
+
+    class FakeModels:
+        def generate_content(self, **_):
+            raise RuntimeError("429 RESOURCE_EXHAUSTED quotaId per-minute")
+
+    class FakeClient:
+        def __init__(self, **_):
+            self.models = FakeModels()
+
+    monkeypatch.setattr("google.genai.Client", FakeClient)
+    with pytest.raises(TranscriptionError):
+        transcribe_audio(wav)
