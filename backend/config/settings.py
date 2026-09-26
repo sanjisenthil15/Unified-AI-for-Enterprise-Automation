@@ -20,7 +20,14 @@ class Settings(BaseSettings):
         psycopg2), which SQLAlchemy only picks up for the explicit
         postgresql+psycopg:// scheme — rewrite it so a pasted-in managed
         connection string works without a manual edit.
+
+        Also strips stray leading/trailing whitespace or newlines — easy to
+        pick up invisibly when copy-pasting a long connection string into a
+        dashboard's env-var field, and otherwise gets sent to Postgres as
+        part of the database name (e.g. "postgres\n"), which then fails
+        with a confusing "database ... does not exist" error.
         """
+        v = v.strip()
         if v.startswith("postgres://"):
             return "postgresql+psycopg://" + v[len("postgres://"):]
         if v.startswith("postgresql://"):
