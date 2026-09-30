@@ -48,6 +48,7 @@ from modules.meeting_intelligence.router import router as meeting_router
 from modules.meeting_online.router import router as online_meeting_router
 from modules.recruitment.router import router as recruitment_router
 from modules.customer_support.router import router as customer_support_router
+from modules.incident_management.router import router as incident_router
 
 
 @asynccontextmanager
@@ -67,7 +68,6 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logging.getLogger(__name__).warning("Startup meeting recovery skipped", exc_info=True)
     yield
-
 
 # ------------------------------------------------------------------ #
 # Application instance
@@ -107,6 +107,7 @@ API_PREFIX = "/api/v1"
 app.include_router(auth_router,             prefix=API_PREFIX)
 app.include_router(recruitment_router,      prefix=API_PREFIX)
 app.include_router(customer_support_router, prefix=API_PREFIX)
+app.include_router(incident_router,          prefix=API_PREFIX)
 # Static /meetings/online routes precede offline /meetings/{meeting_id}.
 app.include_router(online_meeting_router,   prefix=API_PREFIX)
 app.include_router(meeting_router,          prefix=API_PREFIX)

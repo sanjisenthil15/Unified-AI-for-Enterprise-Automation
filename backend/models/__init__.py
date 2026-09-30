@@ -16,7 +16,7 @@ from models.job_posting import JobPosting   # noqa: F401
 from models.resume      import Resume       # noqa: F401
 from models.employee    import Employee     # noqa: F401
 from models.candidate   import Candidate    # noqa: F401
-from models.incident    import Incident     # noqa: F401
+from models.incident    import Incident, IncidentTimeline, IncidentAITriage  # noqa: F401
 
 # Customer Support models
 from models.ticket import (                # noqa: F401

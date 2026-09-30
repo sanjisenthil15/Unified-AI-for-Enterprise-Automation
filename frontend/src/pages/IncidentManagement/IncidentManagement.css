@@ -1,0 +1,110 @@
+/*
+ * IncidentManagement.css
+ * Incident-specific styles — extends shared Recruitment.css + App.css variables.
+ */
+
+.inc-page { max-width: 1200px; }
+
+/* ── Stats row — 7 cards ──────────────────────────────────────────── */
+.inc-stats-row {
+  grid-template-columns: repeat(7, 1fr) !important;
+}
+@media (max-width: 1100px) { .inc-stats-row { grid-template-columns: repeat(4, 1fr) !important; } }
+@media (max-width: 700px)  { .inc-stats-row { grid-template-columns: repeat(2, 1fr) !important; } }
+
+/* ── Controls ─────────────────────────────────────────────────────── */
+.inc-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.inc-search-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+/* ── Create form box ──────────────────────────────────────────────── */
+.inc-create-box {
+  margin-top: 1.25rem;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+
+/* ── Action bar ───────────────────────────────────────────────────── */
+.inc-action-bar {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.danger-btn {
+  color: var(--danger) !important;
+  border-color: rgba(220, 38, 38, 0.3) !important;
+  background: #fff1f2 !important;
+}
+.danger-btn:hover { background: #fee2e2 !important; }
+
+/* ── Triage section ───────────────────────────────────────────────── */
+.inc-triage-section {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  margin-top: 1.25rem;
+}
+
+/* ── Timeline ─────────────────────────────────────────────────────── */
+.inc-timeline {
+  position: relative;
+  padding-left: 1.5rem;
+  border-left: 2px solid var(--border);
+  margin-left: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.inc-timeline-entry {
+  position: relative;
+  padding: 0.6rem 0 0.6rem 1rem;
+}
+.inc-timeline-dot {
+  position: absolute;
+  left: -1.6rem;
+  top: 0.85rem;
+  width: 10px;
+  height: 10px;
+  background: var(--primary);
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 2px var(--primary);
+}
+.inc-timeline-action {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-transform: capitalize;
+}
+.inc-timeline-notes {
+  font-size: 0.83rem;
+  color: var(--text-secondary);
+  margin-top: 0.15rem;
+  line-height: 1.5;
+}
+.inc-timeline-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.2rem;
+}
+
+/* ── Responsive ───────────────────────────────────────────────────── */
+@media (max-width: 700px) {
+  .inc-action-bar { flex-direction: column; }
+  .detail-ai-grid { grid-template-columns: 1fr !important; }
+}
