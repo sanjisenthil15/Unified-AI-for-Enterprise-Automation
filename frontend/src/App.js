@@ -42,6 +42,9 @@ export default function App() {
         {/* All authenticated routes share AppLayout (sidebar is role-filtered inside) */}
         <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
 
+          {/* Development default landing page: Customer Support module */}
+          <Route path="/"                 element={<CustomerSupport />} />
+
           {/* Admin / default routes */}
           <Route path="/dashboard"        element={<Dashboard />} />
           <Route path="/customer-support" element={<CustomerSupport />} />

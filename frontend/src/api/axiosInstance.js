@@ -36,10 +36,12 @@ axiosInstance.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Token is invalid or expired — clear storage and force re-login
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      // In dev mode with login bypass, do not force hard redirect to /login
+      // Preserved production behavior:
+      // localStorage.removeItem('access_token');
+      // localStorage.removeItem('user');
+      // window.location.href = '/login';
+      console.warn('[Dev Mode] API endpoint returned 401 Unauthorized:', error.config?.url);
     }
     return Promise.reject(error);
   }

@@ -17,7 +17,14 @@ To run the server:
 """
 
 import logging
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+# Ensure backend directory is in sys.path so modules can import from config, models, auth, etc.
+BACKEND_DIR = Path(__file__).resolve().parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,6 +47,7 @@ from modules.meeting_intelligence import service as meeting_service
 from modules.meeting_intelligence.router import router as meeting_router
 from modules.meeting_online.router import router as online_meeting_router
 from modules.recruitment.router import router as recruitment_router
+from modules.customer_support.router import router as customer_support_router
 
 
 @asynccontextmanager
@@ -96,22 +104,20 @@ app.add_middleware(
 # ------------------------------------------------------------------ #
 API_PREFIX = "/api/v1"
 
-app.include_router(auth_router,        prefix=API_PREFIX)
-app.include_router(recruitment_router, prefix=API_PREFIX)
+app.include_router(auth_router,             prefix=API_PREFIX)
+app.include_router(recruitment_router,      prefix=API_PREFIX)
+app.include_router(customer_support_router, prefix=API_PREFIX)
 # Static /meetings/online routes precede offline /meetings/{meeting_id}.
-app.include_router(online_meeting_router, prefix=API_PREFIX)
-app.include_router(meeting_router,     prefix=API_PREFIX)
-# Future modules will be registered here, for example:
-# app.include_router(employee_router,  prefix=API_PREFIX)
-# app.include_router(incident_router,  prefix=API_PREFIX)
+app.include_router(online_meeting_router,   prefix=API_PREFIX)
+app.include_router(meeting_router,          prefix=API_PREFIX)
 # app.include_router(analytics_router, prefix=API_PREFIX)
-# app.include_router(support_router,   prefix=API_PREFIX)
 
 # ------------------------------------------------------------------ #
 # Database schema is managed by Alembic, NOT by Base.metadata.create_all().
 # Apply migrations before starting the server:
 #     cd backend && alembic upgrade head
 # ------------------------------------------------------------------ #
+
 
 
 # ------------------------------------------------------------------ #

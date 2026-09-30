@@ -5,8 +5,9 @@ Imports all ORM models so that SQLAlchemy's metadata is fully populated
 before Alembic autogenerate / Base.metadata.create_all() runs.
 
 Import order matters for FK resolution:
-  Role → User → JobPosting → Resume, then the remaining domain tables.
-The Meeting Intelligence tables (models.meeting*) FK into users and employees.
+  Role → User → JobPosting → Resume → SupportTeam → SupportCategory →
+  KnowledgeDocument → KnowledgeChunk → ChatSession → SupportTicket →
+  ChatMessage → TicketMessage
 """
 
 from models.role        import Role         # noqa: F401
@@ -15,8 +16,19 @@ from models.job_posting import JobPosting   # noqa: F401
 from models.resume      import Resume       # noqa: F401
 from models.employee    import Employee     # noqa: F401
 from models.candidate   import Candidate    # noqa: F401
-from models.ticket      import SupportTicket  # noqa: F401
 from models.incident    import Incident     # noqa: F401
+
+# Customer Support models
+from models.ticket import (                # noqa: F401
+    SupportTeam,
+    SupportCategory,
+    KnowledgeDocument,
+    KnowledgeChunk,
+    ChatSession,
+    ChatMessage,
+    SupportTicket,
+    TicketMessage,
+)
 
 # --- Meeting Intelligence (feature/meeting-offline) --- #
 from models.meeting                    import Meeting                    # noqa: F401

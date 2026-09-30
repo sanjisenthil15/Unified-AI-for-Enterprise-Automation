@@ -101,6 +101,246 @@ CREATE TRIGGER trg_employees_updated_at BEFORE UPDATE ON employees
 CREATE TYPE job_posting_experience_level AS ENUM ('entry', 'junior', 'mid', 'senior', 'lead');
 CREATE TYPE job_posting_status           AS ENUM ('draft', 'active', 'closed');
 
+CREATE TABLE support_teams (
+    id          SMALLINT UNSIGNED   NOT NULL AUTO_INCREMENT,
+    name        VARCHAR(100)        NOT NULL,
+    code        VARCHAR(50)         NOT NULL,
+    description VARCHAR(255)        NULL,
+    is_active   TINYINT(1)          NOT NULL DEFAULT 1,
+    created_at  DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_st_name (name),
+    UNIQUE KEY uq_st_code (code)
+) ENGINE=InnoDB;
+
+CREATE TABLE support_categories (
+    id              SMALLINT UNSIGNED   NOT NULL AUTO_INCREMENT,
+    name            VARCHAR(80)         NOT NULL,
+    description     VARCHAR(255)        NULL,
+    default_team_id SMALLINT UNSIGNED   NULL,
+    created_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_sc_name (name),
+    INDEX idx_sc_team (default_team_id),
+    CONSTRAINT fk_sc_team
+        FOREIGN KEY (default_team_id) REFERENCES support_teams (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE knowledge_documents (
+    id              BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT,
+    title           VARCHAR(255)        NOT NULL,
+    category_id     SMALLINT UNSIGNED   NULL,
+    doc_type        ENUM('faq','product_guide','billing_policy','troubleshooting','auth_procedure','general_policy')
+                                        NOT NULL DEFAULT 'faq',
+    content         LONGTEXT            NOT NULL,
+    is_published    TINYINT(1)          NOT NULL DEFAULT 1,
+    created_by      BIGINT UNSIGNED     NULL,
+    created_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_kd_category  (category_id),
+    INDEX idx_kd_published (is_published),
+    INDEX idx_kd_title     (title),
+    CONSTRAINT fk_kd_category
+        FOREIGN KEY (category_id) REFERENCES support_categories (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_kd_creator
+        FOREIGN KEY (created_by) REFERENCES users (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE knowledge_chunks (
+    id              BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT,
+    document_id     BIGINT UNSIGNED     NOT NULL,
+    chunk_index     INT UNSIGNED        NOT NULL,
+    chunk_text      TEXT                NOT NULL,
+    keywords        VARCHAR(255)        NULL,
+    created_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_kc_doc (document_id),
+    CONSTRAINT fk_kc_doc
+        FOREIGN KEY (document_id) REFERENCES knowledge_documents (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE chat_sessions (
+    id              VARCHAR(64)         NOT NULL,
+    user_id         BIGINT UNSIGNED     NULL,
+    customer_name   VARCHAR(120)        NULL,
+    customer_email  VARCHAR(255)        NULL,
+    status          ENUM('active','resolved','escalated')
+                                        NOT NULL DEFAULT 'active',
+    created_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_cs_user   (user_id),
+    INDEX idx_cs_status (status),
+    INDEX idx_cs_email  (customer_email),
+    CONSTRAINT fk_cs_user
+        FOREIGN KEY (user_id) REFERENCES users (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE chat_messages (
+    id                  BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT,
+    session_id          VARCHAR(64)         NOT NULL,
+    sender_type         ENUM('customer','ai','agent') NOT NULL,
+    sender_id           BIGINT UNSIGNED     NULL,
+    message             TEXT                NOT NULL,
+    retrieved_context   TEXT                NULL,
+    confidence_score    FLOAT               NULL,
+    is_escalated        TINYINT(1)          NOT NULL DEFAULT 0,
+    created_at          DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_cm_session (session_id),
+    INDEX idx_cm_sender  (sender_id),
+    CONSTRAINT fk_cm_session
+        FOREIGN KEY (session_id) REFERENCES chat_sessions (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_cm_sender
+        FOREIGN KEY (sender_id) REFERENCES users (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE support_tickets (
+    id                  BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT,
+    session_id          VARCHAR(64)         NULL,
+    category_id         SMALLINT UNSIGNED   NULL,
+    team_id             SMALLINT UNSIGNED   NULL,
+    submitted_by        BIGINT UNSIGNED     NOT NULL,           -- FK → users
+    assigned_to         BIGINT UNSIGNED     NULL,               -- FK → users (support agent)
+    customer_name       VARCHAR(120)        NULL,
+    customer_email      VARCHAR(255)        NULL,
+    subject             VARCHAR(255)        NOT NULL,
+    description         TEXT                NOT NULL,
+    priority            ENUM('low','medium','high','critical')
+                                            NOT NULL DEFAULT 'medium',
+    status              ENUM('open','assigned','in_progress','waiting_for_customer','resolved','closed','escalated')
+                                            NOT NULL DEFAULT 'open',
+    channel             ENUM('web','email','chat','api')
+                                            NOT NULL DEFAULT 'chat',
+    escalation_reason   VARCHAR(255)        NULL,
+    ai_summary          TEXT                NULL,
+    resolved_at         DATETIME            NULL,
+    created_at          DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_st_status    (status),
+    INDEX idx_st_priority  (priority),
+    INDEX idx_st_submitter (submitted_by),
+    INDEX idx_st_assignee  (assigned_to),
+    INDEX idx_st_category  (category_id),
+    INDEX idx_st_team      (team_id),
+    INDEX idx_st_session   (session_id),
+    CONSTRAINT fk_st_session
+        FOREIGN KEY (session_id) REFERENCES chat_sessions (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_st_category
+        FOREIGN KEY (category_id) REFERENCES support_categories (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_st_team
+        FOREIGN KEY (team_id) REFERENCES support_teams (id)
+        ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_st_submitter
+        FOREIGN KEY (submitted_by) REFERENCES users (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_st_assignee
+        FOREIGN KEY (assigned_to) REFERENCES users (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- AI replies and human replies on a ticket thread
+CREATE TABLE ticket_messages (
+    id          BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT,
+    ticket_id   BIGINT UNSIGNED     NOT NULL,
+    sender_id   BIGINT UNSIGNED     NULL,                   -- NULL = AI-generated
+    message     TEXT                NOT NULL,
+    is_ai       TINYINT(1)          NOT NULL DEFAULT 0,
+    ai_model    VARCHAR(60)         NULL,
+    created_at  DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_tm_ticket (ticket_id),
+    CONSTRAINT fk_tm_ticket
+        FOREIGN KEY (ticket_id) REFERENCES support_tickets (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_tm_sender
+        FOREIGN KEY (sender_id) REFERENCES users (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- =============================================================================
+-- 4. INCIDENT MANAGEMENT
+-- =============================================================================
+
+CREATE TABLE incidents (
+    id              BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT,
+    reported_by     BIGINT UNSIGNED     NOT NULL,
+    assigned_to     BIGINT UNSIGNED     NULL,
+    title           VARCHAR(255)        NOT NULL,
+    description     TEXT                NOT NULL,
+    severity        ENUM('low','medium','high','critical')
+                                        NOT NULL DEFAULT 'medium',
+    status          ENUM('open','investigating','resolved','closed')
+                                        NOT NULL DEFAULT 'open',
+    affected_system VARCHAR(120)        NULL,
+    root_cause      TEXT                NULL,               -- filled after investigation
+    resolved_at     DATETIME            NULL,
+    created_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_inc_status   (status),
+    INDEX idx_inc_severity (severity),
+    INDEX idx_inc_reporter (reported_by),
+    INDEX idx_inc_assignee (assigned_to),
+    CONSTRAINT fk_inc_reporter
+        FOREIGN KEY (reported_by) REFERENCES users (id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_inc_assignee
+        FOREIGN KEY (assigned_to) REFERENCES users (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Audit trail: every status change or comment on an incident
+CREATE TABLE incident_timeline (
+    id              BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT,
+    incident_id     BIGINT UNSIGNED     NOT NULL,
+    actor_id        BIGINT UNSIGNED     NULL,               -- NULL = AI action
+    action          VARCHAR(80)         NOT NULL,           -- e.g. 'status_changed', 'comment_added'
+    notes           TEXT                NULL,
+    created_at      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_it_incident (incident_id),
+    CONSTRAINT fk_it_incident
+        FOREIGN KEY (incident_id) REFERENCES incidents (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_it_actor
+        FOREIGN KEY (actor_id) REFERENCES users (id)
+        ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- AI triage suggestions per incident
+CREATE TABLE incident_ai_triage (
+    id              BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT,
+    incident_id     BIGINT UNSIGNED     NOT NULL,
+    suggested_severity  VARCHAR(20)     NOT NULL,
+    suggested_owner VARCHAR(120)        NULL,
+    reasoning       TEXT                NOT NULL,
+    confidence      DECIMAL(5,2)        NULL,               -- 0.00 – 100.00
+    ai_model        VARCHAR(60)         NOT NULL DEFAULT 'gemini',
+    generated_at    DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_iat_incident (incident_id),
+    CONSTRAINT fk_iat_incident
+        FOREIGN KEY (incident_id) REFERENCES incidents (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- =============================================================================
+-- 5. RECRUITMENT AI
+-- =============================================================================
+>>>>>>> origin/customers-support
+
 CREATE TABLE job_postings (
     id               BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     created_by       BIGINT       NOT NULL
