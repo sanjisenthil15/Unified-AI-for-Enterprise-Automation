@@ -69,7 +69,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
-        extra="ignore",
         case_sensitive=True,
         # Other modules (e.g. modules/meeting_intelligence/config.py) read
         # module-prefixed keys (MEETING_*) from this same shared .env file.
