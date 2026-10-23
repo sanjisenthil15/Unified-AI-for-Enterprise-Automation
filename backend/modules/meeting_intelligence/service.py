@@ -64,6 +64,7 @@ def create_meeting(
     title: str,
     description: str | None = None,
     meeting_date: datetime | None = None,
+    project_id: int | None = None,
     storage: MeetingVideoStorage | None = None,
 ) -> Meeting:
     """
@@ -83,6 +84,7 @@ def create_meeting(
         title=title.strip(),
         description=description,
         meeting_date=meeting_date,
+        project_id=project_id,
         status="pending",
     )
     db.add(meeting)
@@ -240,6 +242,55 @@ def assign_action_item(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"User id={assigned_to_user_id} does not exist.")
     item.assigned_to_user_id = assigned_to_user_id
     item.assignment_method = "manual" if assigned_to_user_id is not None else "unassigned"
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def convert_action_item_to_task(
+    db: Session, current_user: User, current_employee,
+    meeting: Meeting, action_item_id: int, sprint_id: int, assignee_id: int, due_date,
+) -> MeetingActionItem:
+    """Turns an action item into an assigned Sprint task. Reuses
+    modules/sprints/service.py's own task-creation logic (and its
+    authorization: the caller must be that sprint's project's team lead,
+    or admin/hr_manager) rather than duplicating it here. Idempotent via
+    converted_sprint_task_id — calling this twice on an already-converted
+    item just raises a 409 rather than creating a duplicate task."""
+    from types import SimpleNamespace
+
+    from modules.sprints import service as sprints_service
+
+    if meeting.project_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This meeting isn't linked to a project yet — link it first.")
+
+    item = (
+        db.query(MeetingActionItem)
+        .filter(MeetingActionItem.id == action_item_id, MeetingActionItem.meeting_id == meeting.id)
+        .first()
+    )
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Action item id={action_item_id} not found.")
+    if item.converted_sprint_task_id is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This action item was already converted into a Sprint task.")
+
+    sprint = sprints_service.get_sprint(db, sprint_id)
+    if sprint.project_id != meeting.project_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "sprint_id must belong to this meeting's project.")
+
+    task_payload = SimpleNamespace(
+        title=item.description[:200],
+        description=item.description,
+        assignee_id=assignee_id,
+        due_date=due_date,
+    )
+    task = sprints_service.create_task(db, current_user, current_employee, sprint_id, task_payload)
+
+    item.converted_sprint_task_id = task["id"]
+    item.assigned_to_employee_id = assignee_id
+    item.assignment_method = "manual"
+    if due_date is not None:
+        item.due_date = due_date
     db.commit()
     db.refresh(item)
     return item

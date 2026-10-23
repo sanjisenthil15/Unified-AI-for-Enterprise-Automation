@@ -36,7 +36,8 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from config.database import get_db
-from core.dependencies import get_current_user
+from core.dependencies import get_current_employee_optional, get_current_user
+from models.employee import Employee
 from models.user import User
 from modules.meeting_intelligence import service
 from modules.meeting_intelligence.pipeline import run_meeting_pipeline
@@ -44,6 +45,7 @@ from modules.meeting_intelligence.schemas import (
     ActionItemOut,
     AnalysisResponse,
     AssignActionItem,
+    ConvertActionItem,
     MeetingListItem,
     MeetingResponse,
     SpeakerOut,
@@ -71,6 +73,7 @@ async def upload_meeting(
     title: str = Form(..., min_length=1, max_length=255),
     description: Optional[str] = Form(None, max_length=4000),
     meeting_date: Optional[datetime] = Form(None),
+    project_id: Optional[int] = Form(None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -83,6 +86,7 @@ async def upload_meeting(
         title=title,
         description=description,
         meeting_date=meeting_date,
+        project_id=project_id,
         storage=storage,
     )
     background_tasks.add_task(run_meeting_pipeline, meeting.id)
@@ -184,6 +188,26 @@ def assign_action_item(
 ):
     service.get_owned_meeting(db, meeting_id, current_user.id)
     return service.assign_action_item(db, meeting_id, action_item_id, payload.assigned_to_user_id)
+
+
+@router.post(
+    "/{meeting_id}/action-items/{action_item_id}/convert",
+    response_model=ActionItemOut,
+    summary="Convert an action item into an assigned Sprint task",
+)
+def convert_action_item(
+    meeting_id: int,
+    action_item_id: int,
+    payload: ConvertActionItem,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
+):
+    meeting = service.get_owned_meeting(db, meeting_id, current_user.id)
+    return service.convert_action_item_to_task(
+        db, current_user, current_employee, meeting, action_item_id,
+        payload.sprint_id, payload.assignee_id, payload.due_date,
+    )
 
 
 @router.post(

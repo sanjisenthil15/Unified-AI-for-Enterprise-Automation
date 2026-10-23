@@ -49,6 +49,14 @@ class Meeting(Base):
         nullable=False,
         index=True,
     )
+    # Which project this meeting was about, if any — lets action items be
+    # converted into assigned Sprint tasks for that project's team.
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.id", onupdate="CASCADE", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # --- meeting metadata ------------------------------------------------- #
     title        = Column(String(255), nullable=False)
@@ -95,6 +103,7 @@ class Meeting(Base):
 
     # --- relationships -------------------------------------------------- #
     creator = relationship("User", foreign_keys=[created_by])
+    project = relationship("Project", foreign_keys=[project_id])
 
     participants = relationship(
         "MeetingParticipant", back_populates="meeting",

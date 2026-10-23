@@ -13,10 +13,15 @@ from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
-from core.authorization import is_team_lead_of
+from core.authorization import assert_project_manager, is_team_lead_of
+from models.chat_channel import ChatChannel
+from models.chat_channel_message import ChatChannelMessage
+from models.chat_group import ChatGroup
+from models.chat_group_member import ChatGroupMember
 from models.employee import Employee
 from models.manager_chat_message import ManagerChatMessage
 from models.manager_chat_thread import ManagerChatThread
+from models.project import Project
 from models.user import User
 
 from modules.notifications.service import create_notification
@@ -245,3 +250,212 @@ def mark_thread_read(db: Session, current_user: User, current_employee: Employee
     )
     db.commit()
     return updated
+
+
+# ------------------------------------------------------------------ #
+# Groups & channels
+# ------------------------------------------------------------------ #
+
+def _get_group_or_404(db: Session, group_id: int) -> ChatGroup:
+    group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+    if group is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Chat group id={group_id} not found.")
+    return group
+
+
+def _assert_group_member(db: Session, group: ChatGroup, current_user: User) -> ChatGroupMember:
+    member = (
+        db.query(ChatGroupMember)
+        .filter(ChatGroupMember.group_id == group.id, ChatGroupMember.user_id == current_user.id)
+        .first()
+    )
+    if member is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You're not a member of this group.")
+    return member
+
+
+def _group_response(db: Session, group: ChatGroup, current_user: User) -> dict:
+    project = group.project or db.query(Project).filter(Project.id == group.project_id).first()
+    member = (
+        db.query(ChatGroupMember)
+        .filter(ChatGroupMember.group_id == group.id, ChatGroupMember.user_id == current_user.id)
+        .first()
+    )
+    unread = False
+    if member is not None:
+        last_message = (
+            db.query(ChatChannelMessage)
+            .join(ChatChannel)
+            .filter(ChatChannel.group_id == group.id)
+            .order_by(ChatChannelMessage.created_at.desc())
+            .first()
+        )
+        if last_message is not None and (member.last_read_at is None or last_message.created_at > member.last_read_at):
+            unread = True
+    return {
+        "id": group.id,
+        "project_id": group.project_id,
+        "project_name": project.name if project else "",
+        "name": group.name,
+        "member_count": db.query(ChatGroupMember).filter(ChatGroupMember.group_id == group.id).count(),
+        "unread": unread,
+        "created_at": group.created_at,
+    }
+
+
+def create_group(db: Session, current_user: User, current_employee: Employee | None, payload) -> dict:
+    assert_project_manager(db, current_user, current_employee, payload.project_id)
+
+    group = ChatGroup(project_id=payload.project_id, name=payload.name, created_by_user_id=current_user.id)
+    db.add(group)
+    db.flush()
+
+    db.add(ChatChannel(group_id=group.id, name="general", created_by_user_id=current_user.id))
+
+    member_ids = set(payload.member_user_ids) | {current_user.id}
+    for user_id in member_ids:
+        db.add(ChatGroupMember(group_id=group.id, user_id=user_id))
+
+    db.commit()
+    db.refresh(group)
+
+    for user_id in member_ids:
+        if user_id != current_user.id:
+            create_notification(db, user_id, "chat_group_created", f"You were added to the group '{group.name}'.", f"/chat?group={group.id}")
+
+    return _group_response(db, group, current_user)
+
+
+def list_groups(db: Session, current_user: User) -> list[dict]:
+    group_ids = [
+        m.group_id for m in db.query(ChatGroupMember).filter(ChatGroupMember.user_id == current_user.id).all()
+    ]
+    if not group_ids:
+        return []
+    groups = db.query(ChatGroup).options(joinedload(ChatGroup.project)).filter(ChatGroup.id.in_(group_ids)).all()
+    return [_group_response(db, g, current_user) for g in groups]
+
+
+def get_group_detail(db: Session, current_user: User, group_id: int) -> dict:
+    group = _get_group_or_404(db, group_id)
+    _assert_group_member(db, group, current_user)
+
+    members = (
+        db.query(ChatGroupMember)
+        .options(joinedload(ChatGroupMember.user))
+        .filter(ChatGroupMember.group_id == group.id)
+        .all()
+    )
+    channels = db.query(ChatChannel).filter(ChatChannel.group_id == group.id).order_by(ChatChannel.created_at).all()
+
+    base = _group_response(db, group, current_user)
+    base["members"] = [{"user_id": m.user_id, "full_name": m.user.full_name} for m in members]
+    base["channels"] = [{"id": c.id, "name": c.name} for c in channels]
+    return base
+
+
+def add_member(db: Session, current_user: User, current_employee: Employee | None, group_id: int, user_id: int) -> None:
+    group = _get_group_or_404(db, group_id)
+    assert_project_manager(db, current_user, current_employee, group.project_id)
+
+    existing = (
+        db.query(ChatGroupMember)
+        .filter(ChatGroupMember.group_id == group.id, ChatGroupMember.user_id == user_id)
+        .first()
+    )
+    if existing is not None:
+        return
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if target_user is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"User id={user_id} does not exist.")
+
+    db.add(ChatGroupMember(group_id=group.id, user_id=user_id))
+    db.commit()
+    create_notification(db, user_id, "chat_group_member_added", f"You were added to the group '{group.name}'.", f"/chat?group={group.id}")
+
+
+def remove_member(db: Session, current_user: User, current_employee: Employee | None, group_id: int, user_id: int) -> None:
+    group = _get_group_or_404(db, group_id)
+    assert_project_manager(db, current_user, current_employee, group.project_id)
+    db.query(ChatGroupMember).filter(
+        ChatGroupMember.group_id == group.id, ChatGroupMember.user_id == user_id,
+    ).delete()
+    db.commit()
+
+
+def create_channel(db: Session, current_user: User, group_id: int, name: str) -> ChatChannel:
+    group = _get_group_or_404(db, group_id)
+    _assert_group_member(db, group, current_user)
+
+    existing = db.query(ChatChannel).filter(ChatChannel.group_id == group.id, ChatChannel.name == name).first()
+    if existing is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"A channel named '{name}' already exists in this group.")
+
+    channel = ChatChannel(group_id=group.id, name=name, created_by_user_id=current_user.id)
+    db.add(channel)
+    db.commit()
+    db.refresh(channel)
+    return channel
+
+
+def list_channels(db: Session, current_user: User, group_id: int) -> list[ChatChannel]:
+    group = _get_group_or_404(db, group_id)
+    _assert_group_member(db, group, current_user)
+    return db.query(ChatChannel).filter(ChatChannel.group_id == group.id).order_by(ChatChannel.created_at).all()
+
+
+def _get_channel_for_member(db: Session, current_user: User, channel_id: int) -> ChatChannel:
+    channel = db.query(ChatChannel).options(joinedload(ChatChannel.group)).filter(ChatChannel.id == channel_id).first()
+    if channel is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Channel id={channel_id} not found.")
+    _assert_group_member(db, channel.group, current_user)
+    return channel
+
+
+def _channel_message_response(message: ChatChannelMessage) -> dict:
+    return {
+        "id": message.id,
+        "channel_id": message.channel_id,
+        "sender_user_id": message.sender_user_id,
+        "sender_name": message.sender.full_name if message.sender else None,
+        "body": message.body,
+        "created_at": message.created_at,
+    }
+
+
+def get_channel_messages(db: Session, current_user: User, channel_id: int, since_id: int | None) -> list[dict]:
+    channel = _get_channel_for_member(db, current_user, channel_id)
+    query = (
+        db.query(ChatChannelMessage)
+        .options(joinedload(ChatChannelMessage.sender))
+        .filter(ChatChannelMessage.channel_id == channel.id)
+    )
+    if since_id is not None:
+        query = query.filter(ChatChannelMessage.id > since_id)
+    messages = query.order_by(ChatChannelMessage.created_at).all()
+    return [_channel_message_response(m) for m in messages]
+
+
+def send_channel_message(db: Session, current_user: User, channel_id: int, body: str) -> dict:
+    channel = _get_channel_for_member(db, current_user, channel_id)
+    message = ChatChannelMessage(channel_id=channel.id, sender_user_id=current_user.id, body=body)
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+    message = (
+        db.query(ChatChannelMessage).options(joinedload(ChatChannelMessage.sender))
+        .filter(ChatChannelMessage.id == message.id).first()
+    )
+    return _channel_message_response(message)
+
+
+def mark_channel_read(db: Session, current_user: User, channel_id: int) -> None:
+    channel = _get_channel_for_member(db, current_user, channel_id)
+    member = (
+        db.query(ChatGroupMember)
+        .filter(ChatGroupMember.group_id == channel.group_id, ChatGroupMember.user_id == current_user.id)
+        .first()
+    )
+    if member is not None:
+        member.last_read_at = datetime.utcnow()
+        db.commit()

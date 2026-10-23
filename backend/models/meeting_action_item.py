@@ -99,6 +99,15 @@ class MeetingActionItem(Base):
     )
     ai_confidence = Column(Float, nullable=True, comment="0-1 confidence from the extractor")
 
+    # Set once this action item has been turned into a Sprint task, so the
+    # "convert" action is idempotent and the UI can show "View in Sprint"
+    # instead of "Convert" again.
+    converted_sprint_task_id = Column(
+        BigInteger,
+        ForeignKey("sprint_tasks.id", onupdate="CASCADE", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

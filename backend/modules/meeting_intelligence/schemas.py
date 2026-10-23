@@ -22,12 +22,14 @@ class MeetingCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = Field(None, max_length=4000)
     meeting_date: datetime | None = None
+    project_id: int | None = Field(None, description="Which project this meeting was about, if any")
 
 
 class MeetingResponse(BaseModel):
     id: int
     title: str
     description: str | None = None
+    project_id: int | None = None
     status: str
     error_message: str | None = None
     source_video_filename: str | None = None
@@ -126,6 +128,7 @@ class ActionItemOut(BaseModel):
     status: str
     source: str
     ai_confidence: float | None = None
+    converted_sprint_task_id: int | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -135,3 +138,13 @@ class AssignActionItem(BaseModel):
     assigned_to_user_id: int | None = Field(
         None, description="User id to assign this action item to; null to unassign.",
     )
+
+
+class ConvertActionItem(BaseModel):
+    """Turns a meeting action item into an assigned Sprint task. Requires
+    the meeting to have a project_id. sprint_id must belong to that
+    project — ordinary Sprint authorization (that project's team lead, or
+    admin/hr_manager) applies, same as creating a task directly."""
+    sprint_id: int
+    assignee_id: int = Field(..., description="Employee id to assign the new Sprint task to")
+    due_date: date | None = None

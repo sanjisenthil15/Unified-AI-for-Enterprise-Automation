@@ -133,3 +133,74 @@ def test_manager_review_flags_overdue_tasks(client, new_user, unique_email):
     entry = next(e for e in r.json() if e["employee"]["id"] == member["employee_id"])
     assert entry["tasks_overdue_incomplete"] == 2
     assert entry["flagged"] is True
+
+
+def test_overdue_task_notifies_team_lead_once(client, new_user, unique_email):
+    admin = new_user("Admin User")
+    project, lead = _make_project_with_lead(client, admin["headers"], unique_email)
+    member = _onboard(client, admin["headers"], _tag(unique_email, "member"), "Member", project_id=project["id"])
+
+    sprint = client.post(SPR_BASE, headers=lead["headers"], json={
+        "project_id": project["id"], "name": "Sprint 1", "start_date": "2020-01-01", "end_date": "2020-01-07",
+    }).json()
+    client.post(f"{SPR_BASE}/{sprint['id']}/tasks", headers=lead["headers"], json={
+        "title": "Overdue task", "assignee_id": member["employee_id"], "due_date": "2020-01-10",
+    })
+
+    client.get(f"{SPR_BASE}/review", headers=lead["headers"], params={"project_id": project["id"]})
+    client.get(f"{SPR_BASE}/review", headers=lead["headers"], params={"project_id": project["id"]})
+
+    notifications = client.get("/api/v1/notifications/me", headers=lead["headers"]).json()
+    overdue_notifications = [n for n in notifications if n["type"] == "task_overdue"]
+    assert len(overdue_notifications) == 1
+
+
+def test_generate_weekly_sprints_fills_to_deadline_idempotently(client, new_user, unique_email):
+    admin = new_user("Admin User")
+    project = client.post(f"{EMP_BASE}/projects", headers=admin["headers"], json={
+        "name": f"Project {unique_email}", "deadline": "2027-01-15",
+    }).json()
+    role_id = _role_id(client, admin["headers"], "employee")
+    lead_email = _tag(unique_email, "lead")
+    r = client.post(f"{EMP_BASE}/employees", headers=admin["headers"], json={
+        "full_name": "Team Lead", "email": lead_email, "role_id": role_id,
+        "job_title": "Lead", "project_id": project["id"], "hire_date": "2026-01-01",
+    })
+    lead_employee_id = r.json()["employee"]["id"]
+    client.post(f"{EMP_BASE}/projects/{project['id']}/team-lead", headers=admin["headers"],
+                json={"employee_id": lead_employee_id})
+    temp_password = r.json()["temporary_password"]
+    login = client.post("/api/v1/auth/login", json={"email": lead_email, "password": temp_password})
+    lead_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    # A plain employee cannot generate sprints.
+    outsider = _onboard(client, admin["headers"], _tag(unique_email, "outsider"), "Outsider")
+    r = client.post(f"{SPR_BASE}/generate-weekly", headers=outsider["headers"], json={"project_id": project["id"]})
+    assert r.status_code == 403
+
+    r = client.post(f"{SPR_BASE}/generate-weekly", headers=lead_headers, json={"project_id": project["id"]})
+    assert r.status_code == 200, r.text
+    first_batch = r.json()
+    assert len(first_batch) > 0
+    assert first_batch[-1]["end_date"] == "2027-01-15"
+
+    # Re-running fills nothing further — the deadline is already covered.
+    r = client.post(f"{SPR_BASE}/generate-weekly", headers=lead_headers, json={"project_id": project["id"]})
+    assert r.status_code == 200, r.text
+    assert r.json() == []
+
+    all_sprints = client.get(SPR_BASE, headers=lead_headers, params={"project_id": project["id"]}).json()
+    assert len(all_sprints) == len(first_batch)
+
+
+def test_enterprise_overview_is_admin_only(client, new_user, unique_email):
+    admin = new_user("Admin User")
+    project, lead = _make_project_with_lead(client, admin["headers"], unique_email)
+
+    r = client.get(f"{SPR_BASE}/overview", headers=lead["headers"])
+    assert r.status_code == 403
+
+    r = client.get(f"{SPR_BASE}/overview", headers=admin["headers"])
+    assert r.status_code == 200, r.text
+    entry = next(e for e in r.json() if e["project_id"] == project["id"])
+    assert entry["team_lead"]["id"] == lead["employee_id"]

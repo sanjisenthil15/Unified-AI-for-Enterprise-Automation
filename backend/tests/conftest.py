@@ -39,10 +39,16 @@ def _cleanup_test_rows() -> None:
     a simple substring match is both correct and actually works.
     """
     with engine.begin() as conn:
-        # sprints.project_id is ON DELETE RESTRICT — must clear sprints (and their
-        # cascading tasks/snapshots) before the projects they belong to.
+        # sprints.project_id and chat_groups.project_id are both ON DELETE
+        # RESTRICT — clear sprints (cascading tasks/snapshots) and chat
+        # groups (cascading members/channels/messages) before the projects
+        # they belong to.
         conn.execute(text(
             "DELETE FROM sprints WHERE project_id IN "
+            "(SELECT id FROM projects WHERE name LIKE 'Project %pytest%')"
+        ))
+        conn.execute(text(
+            "DELETE FROM chat_groups WHERE project_id IN "
             "(SELECT id FROM projects WHERE name LIKE 'Project %pytest%')"
         ))
         # Test project names embed the test's unique_email, e.g. "Project pytest_xyz@example.com"

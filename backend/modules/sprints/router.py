@@ -23,12 +23,14 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from config.database import get_db
-from core.dependencies import get_current_employee, get_current_employee_optional, get_current_user
+from core.dependencies import get_current_employee, get_current_employee_optional, get_current_user, require_roles
 from models.employee import Employee
 from models.user import User
 
 from modules.sprints.schemas import (
     BurndownPoint,
+    EnterpriseOverviewEntry,
+    GenerateWeeklySprintsRequest,
     ManagerReviewEntry,
     SprintCreate,
     SprintResponse,
@@ -96,6 +98,24 @@ def manager_review(
     current_employee: Optional[Employee] = Depends(get_current_employee_optional),
 ):
     return service.build_manager_review(db, current_user, current_employee, project_id, start_date, end_date)
+
+
+@router.post("/generate-weekly", response_model=List[SprintResponse], summary="Auto-generate weekly sprint shells up to the project's deadline (manager only)")
+def generate_weekly_sprints(
+    payload: GenerateWeeklySprintsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
+):
+    return service.generate_weekly_sprints(db, current_user, current_employee, payload.project_id)
+
+
+@router.get("/overview", response_model=List[EnterpriseOverviewEntry], summary="Every project at a glance (admin / hr_manager only)")
+def enterprise_overview(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles(["admin", "hr_manager"])),
+):
+    return service.build_enterprise_overview(db)
 
 
 @router.get("/{sprint_id}", response_model=SprintResponse, summary="Get one sprint")

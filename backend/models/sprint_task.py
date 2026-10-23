@@ -46,6 +46,9 @@ class SprintTask(Base):
     )
     progress_percent = Column(Integer, nullable=False, default=0)
     due_date = Column(Date, nullable=True)
+    # Set once a review pass has notified the team lead this task is
+    # overdue, so it isn't re-notified every time the review is computed.
+    overdue_notified_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(

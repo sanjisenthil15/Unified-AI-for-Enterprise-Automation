@@ -201,7 +201,7 @@ def create_project(db: Session, payload) -> Project:
     existing = db.query(Project).filter(Project.name == payload.name).first()
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "A project with this name already exists.")
-    project = Project(name=payload.name, description=payload.description)
+    project = Project(name=payload.name, description=payload.description, deadline=payload.deadline)
     db.add(project)
     db.commit()
     db.refresh(project)

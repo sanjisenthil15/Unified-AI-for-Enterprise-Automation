@@ -32,6 +32,10 @@ class SprintUpdate(BaseModel):
     status: Optional[str] = Field(None, pattern="^(" + "|".join(SPRINT_STATUSES) + ")$")
 
 
+class GenerateWeeklySprintsRequest(BaseModel):
+    project_id: int
+
+
 class SprintProjectInfo(BaseModel):
     id: int
     name: str
@@ -120,3 +124,29 @@ class BurndownPoint(BaseModel):
     total: int
 
     model_config = {"from_attributes": True}
+
+
+# ------------------------------------------------------------------ #
+# Admin: enterprise-wide overview
+# ------------------------------------------------------------------ #
+
+class OverviewTeamLeadInfo(BaseModel):
+    id: int
+    full_name: str
+
+
+class OverviewActiveSprintInfo(BaseModel):
+    id: int
+    name: str
+    end_date: date
+
+
+class EnterpriseOverviewEntry(BaseModel):
+    project_id: int
+    project_name: str
+    deadline: Optional[date] = None
+    team_lead: Optional[OverviewTeamLeadInfo] = None
+    member_count: int
+    active_sprint: Optional[OverviewActiveSprintInfo] = None
+    completion_rate: float
+    flagged_count: int

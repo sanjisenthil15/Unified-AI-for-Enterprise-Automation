@@ -30,6 +30,12 @@ from models.manager_chat_thread    import ManagerChatThread      # noqa: F401
 from models.manager_chat_message   import ManagerChatMessage     # noqa: F401
 from models.notification           import Notification           # noqa: F401
 
+# Group/channel chat (feature/chat-groups)
+from models.chat_group           import ChatGroup            # noqa: F401
+from models.chat_group_member    import ChatGroupMember      # noqa: F401
+from models.chat_channel         import ChatChannel          # noqa: F401
+from models.chat_channel_message import ChatChannelMessage   # noqa: F401
+
 # Customer Support models
 from models.ticket import (                # noqa: F401
     SupportTeam,

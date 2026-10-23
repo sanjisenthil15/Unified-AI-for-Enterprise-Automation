@@ -91,6 +91,50 @@ def create_sprint(db: Session, current_user: User, current_employee: Employee | 
     return get_sprint(db, sprint.id)
 
 
+def generate_weekly_sprints(db: Session, current_user: User, current_employee: Employee | None, project_id: int) -> list[Sprint]:
+    """Fills weekly Sprint *shells* (named "Week N") from today (or the
+    last existing sprint's end_date, for idempotency) up to the project's
+    deadline — it does not invent task content, only the schedule. The
+    manager still creates the actual tasks, manually or by converting
+    meeting action items (see modules/meeting_intelligence)."""
+    project = _get_project(db, project_id)
+    if not _is_manager(current_user, current_employee, project):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only this project's team lead (or admin/hr_manager) can generate sprints.")
+    if project.deadline is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This project has no deadline set yet — set one first.")
+
+    last_sprint = (
+        db.query(Sprint)
+        .filter(Sprint.project_id == project_id)
+        .order_by(Sprint.end_date.desc())
+        .first()
+    )
+    existing_count = db.query(Sprint).filter(Sprint.project_id == project_id).count()
+    cursor = (last_sprint.end_date + timedelta(days=1)) if last_sprint else datetime.utcnow().date()
+
+    created = []
+    week_number = existing_count + 1
+    while cursor <= project.deadline:
+        week_end = min(cursor + timedelta(days=6), project.deadline)
+        sprint = Sprint(
+            project_id=project.id,
+            name=f"Week {week_number}",
+            start_date=cursor,
+            end_date=week_end,
+            status="planned",
+            created_by=current_employee.id if current_employee is not None else None,
+        )
+        db.add(sprint)
+        created.append(sprint)
+        cursor = week_end + timedelta(days=1)
+        week_number += 1
+
+    db.commit()
+    for s in created:
+        db.refresh(s)
+    return [get_sprint(db, s.id) for s in created]
+
+
 def list_sprints(db: Session, current_user: User, current_employee: Employee | None, project_id: int) -> list[Sprint]:
     project = _get_project(db, project_id)
     if not _is_project_member_or_manager(current_user, current_employee, project):
@@ -255,6 +299,25 @@ def update_task(db: Session, current_user: User, current_employee: Employee | No
 # Manager review
 # ------------------------------------------------------------------ #
 
+def _notify_newly_overdue(db: Session, project: Project, overdue_tasks: list[SprintTask]) -> None:
+    """Lazy, request-time check (no cron exists in this app — same pattern
+    as the burndown snapshot): notify the project's team lead once per
+    task the first time it's seen overdue, never again after that."""
+    if project.team_lead is None:
+        return
+    for task in overdue_tasks:
+        if task.overdue_notified_at is not None:
+            continue
+        assignee_name = task.assignee.user.full_name if task.assignee else "Unassigned"
+        create_notification(
+            db, project.team_lead.user_id, "task_overdue",
+            f"Task '{task.title}' assigned to {assignee_name} is overdue — consider extending the deadline.",
+            f"/sprints?project_id={project.id}",
+        )
+        task.overdue_notified_at = datetime.utcnow()
+    db.commit()
+
+
 def build_manager_review(
     db: Session, current_user: User, current_employee: Employee | None,
     project_id: int, start_date: date | None, end_date: date | None,
@@ -274,9 +337,12 @@ def build_manager_review(
         tasks = db.query(SprintTask).join(Sprint).filter(SprintTask.assignee_id == member.id, Sprint.project_id == project_id).all()
         tasks_total = len(tasks)
         tasks_done = len([t for t in tasks if t.status == "done"])
-        tasks_overdue_incomplete = len([t for t in tasks if t.status != "done" and t.due_date is not None and t.due_date < today])
+        overdue_tasks = [t for t in tasks if t.status != "done" and t.due_date is not None and t.due_date < today]
+        tasks_overdue_incomplete = len(overdue_tasks)
         completion_rate = (tasks_done / tasks_total) if tasks_total else 0.0
         flagged = checkin_rate < ATTENDANCE_FLAG_THRESHOLD or tasks_overdue_incomplete >= OVERDUE_TASK_FLAG_THRESHOLD
+
+        _notify_newly_overdue(db, project, overdue_tasks)
 
         entries.append({
             "employee": {"id": member.id, "user_id": member.user_id, "employee_code": member.employee_code, "full_name": member.user.full_name},
@@ -290,6 +356,64 @@ def build_manager_review(
 
     entries.sort(key=lambda e: e["flagged"], reverse=True)
     return entries
+
+
+# ------------------------------------------------------------------ #
+# Admin: enterprise-wide project overview
+# ------------------------------------------------------------------ #
+
+def build_enterprise_overview(db: Session) -> list[dict]:
+    """Every project at a glance — team lead, deadline, active sprint,
+    aggregate task completion, and flagged-employee count. Admin/hr_manager
+    only (enforced in the router via require_roles, not a per-project check
+    — this view is explicitly enterprise-wide)."""
+    projects = db.query(Project).options(joinedload(Project.team_lead).joinedload(Employee.user)).order_by(Project.name).all()
+    today = datetime.utcnow().date()
+
+    overview = []
+    for project in projects:
+        member_count = db.query(Employee).filter(Employee.project_id == project.id, Employee.deleted_at.is_(None)).count()
+        active_sprint = (
+            db.query(Sprint)
+            .filter(Sprint.project_id == project.id, Sprint.status == "active")
+            .order_by(Sprint.end_date)
+            .first()
+        )
+
+        tasks = db.query(SprintTask).join(Sprint).filter(Sprint.project_id == project.id).all()
+        tasks_total = len(tasks)
+        tasks_done = len([t for t in tasks if t.status == "done"])
+        completion_rate = (tasks_done / tasks_total) if tasks_total else 0.0
+
+        flagged_count = 0
+        for member in db.query(Employee).filter(Employee.project_id == project.id, Employee.deleted_at.is_(None)).all():
+            start = today - timedelta(days=7)
+            checkin_rate = compute_checkin_rate(db, member.id, start, today)
+            overdue = len([
+                t for t in tasks
+                if t.assignee_id == member.id and t.status != "done" and t.due_date is not None and t.due_date < today
+            ])
+            if checkin_rate < ATTENDANCE_FLAG_THRESHOLD or overdue >= OVERDUE_TASK_FLAG_THRESHOLD:
+                flagged_count += 1
+
+        overview.append({
+            "project_id": project.id,
+            "project_name": project.name,
+            "deadline": project.deadline,
+            "team_lead": (
+                {"id": project.team_lead.id, "full_name": project.team_lead.user.full_name}
+                if project.team_lead else None
+            ),
+            "member_count": member_count,
+            "active_sprint": (
+                {"id": active_sprint.id, "name": active_sprint.name, "end_date": active_sprint.end_date}
+                if active_sprint else None
+            ),
+            "completion_rate": completion_rate,
+            "flagged_count": flagged_count,
+        })
+
+    return overview
 
 
 # ------------------------------------------------------------------ #

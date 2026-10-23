@@ -6,7 +6,7 @@ Used by the Employee Management module — each project has exactly one
 team lead (an Employee), and employees can be staffed on a project.
 """
 
-from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Date, Integer, BigInteger, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -22,6 +22,7 @@ class Project(Base):
 
     name        = Column(String(150), nullable=False, unique=True)
     description = Column(Text, nullable=True)
+    deadline    = Column(Date, nullable=True)
 
     team_lead_id = Column(
         BigInteger,
