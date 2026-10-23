@@ -254,19 +254,19 @@ export default function Sprints() {
       {error && <div className="alert error">{error}</div>}
 
       {notOnboarded && !allProjects.length ? (
-        <div className="content-panel"><p style={{ color: 'var(--text-muted)' }}>No employee record yet — contact HR to be onboarded.</p></div>
+        <div className="content-panel"><p className="muted-note">No employee record yet — contact HR to be onboarded.</p></div>
       ) : (
         <>
           <div className="content-panel">
-            <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-              <div className="field-group" style={{ minWidth: 220 }}>
+            <div className="field-row">
+              <div className="field-group field-group-wide">
                 <label>Project</label>
                 <select className="field-select" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
                   <option value="">Select a project…</option>
                   {uniqueSelectableProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
-              <div className="field-group" style={{ minWidth: 220 }}>
+              <div className="field-group field-group-wide">
                 <label>Sprint</label>
                 <select className="field-select" value={sprintId} onChange={(e) => setSprintId(e.target.value)}>
                   <option value="">Select a sprint…</option>
@@ -292,7 +292,7 @@ export default function Sprints() {
             </div>
 
             {showSprintForm && (
-              <form onSubmit={handleCreateSprint} style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+              <form onSubmit={handleCreateSprint} className="field-row" style={{ marginTop: '1rem' }}>
                 <div className="field-group">
                   <label>Name</label>
                   <input className="field-input" value={sprintForm.name}
@@ -316,7 +316,7 @@ export default function Sprints() {
           {sprintId && (
             <>
               {isManager && (
-                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                <div className="tab-bar">
                   <button className={tab === 'board' ? 'btn-primary' : 'btn-secondary'} onClick={() => setTab('board')}>Board</button>
                   <button className={tab === 'review' ? 'btn-primary' : 'btn-secondary'} onClick={() => setTab('review')}>Team Review</button>
                 </div>
@@ -324,8 +324,8 @@ export default function Sprints() {
 
               {tab === 'board' && (
                 <div className="content-panel">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <h2 style={{ margin: 0 }}>{selectedSprint?.name}</h2>
+                  <div className="panel-header-row">
+                    <h2>{selectedSprint?.name}</h2>
                     {isManager && (
                       <button className="btn-primary" onClick={() => setShowTaskForm((v) => !v)}>
                         {showTaskForm ? 'Close' : '+ New task'}
@@ -334,7 +334,7 @@ export default function Sprints() {
                   </div>
 
                   {showTaskForm && (
-                    <form onSubmit={handleCreateTask} style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                    <form onSubmit={handleCreateTask} className="field-row" style={{ marginTop: '1rem' }}>
                       <div className="field-group">
                         <label>Title</label>
                         <input className="field-input" value={taskForm.title}
@@ -359,7 +359,7 @@ export default function Sprints() {
 
                   {selectedSprint?.status === 'active' && burndown.length > 0 && (
                     <>
-                      <h3 style={{ fontSize: '0.9rem', marginTop: '1.5rem' }}>Burndown</h3>
+                      <h3 className="section-subheading">Burndown</h3>
                       <div className="burndown-chart">
                         {burndown.map((b) => (
                           <div className="burndown-bar-wrap" key={b.date}>
@@ -394,8 +394,7 @@ export default function Sprints() {
 
                               {isMine && !isManager && (
                                 <button
-                                  className={task.status === 'done' ? 'btn-secondary' : 'btn-primary'}
-                                  style={{ marginTop: '0.5rem', width: '100%' }}
+                                  className={`kanban-card-action ${task.status === 'done' ? 'btn-secondary' : 'btn-primary'}`}
                                   onClick={() => handleToggleDone(task)}
                                 >
                                   {task.status === 'done' ? '↺ Reopen' : '✓ Mark Done'}
@@ -405,30 +404,26 @@ export default function Sprints() {
                               {isManager && (
                                 <>
                                   <button
-                                    className="btn-secondary"
-                                    style={{ marginTop: '0.5rem', width: '100%', fontSize: '0.78rem' }}
+                                    className="kanban-manage-toggle btn-secondary"
                                     onClick={() => setManageTaskId(managing ? null : task.id)}
                                   >
                                     {managing ? 'Close' : 'Manage'}
                                   </button>
                                   {managing && (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
+                                    <div className="kanban-manage-panel">
                                       <select className="field-select" value={task.status}
-                                        onChange={(e) => handleTaskStatus(task.id, e.target.value)}
-                                        style={{ fontSize: '0.78rem', padding: '0.3rem' }}>
+                                        onChange={(e) => handleTaskStatus(task.id, e.target.value)}>
                                         {TASK_COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
                                       </select>
                                       <select className="field-select" value={task.assignee?.id || ''}
-                                        onChange={(e) => handleReassign(task.id, e.target.value)}
-                                        style={{ fontSize: '0.78rem', padding: '0.3rem' }}>
+                                        onChange={(e) => handleReassign(task.id, e.target.value)}>
                                         <option value="">Unassigned</option>
                                         {members.map((m) => <option key={m.id} value={m.id}>{m.full_name}</option>)}
                                       </select>
-                                      <div style={{ display: 'flex', gap: '0.3rem' }}>
+                                      <div className="kanban-manage-due-row">
                                         <input type="date" className="field-input" value={task.due_date || ''}
-                                          onChange={(e) => handleDueDateChange(task.id, e.target.value)}
-                                          style={{ fontSize: '0.78rem', padding: '0.3rem', flex: 1 }} />
-                                        <button className="btn-secondary" style={{ fontSize: '0.72rem', padding: '0.3rem 0.5rem' }}
+                                          onChange={(e) => handleDueDateChange(task.id, e.target.value)} />
+                                        <button className="btn-secondary"
                                           onClick={() => handleExtendTwoDays(task)}>
                                           +2 days
                                         </button>
@@ -449,31 +444,30 @@ export default function Sprints() {
               {tab === 'review' && isManager && (
                 <div className="content-panel">
                   <h2>Team Review (last 7 days)</h2>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <table className="data-table">
                     <thead>
-                      <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border, #e2e8f0)' }}>
-                        <th style={{ padding: '0.5rem' }}>Employee</th>
-                        <th style={{ padding: '0.5rem' }}>Check-in rate</th>
-                        <th style={{ padding: '0.5rem' }}>Tasks done</th>
-                        <th style={{ padding: '0.5rem' }}>Overdue</th>
-                        <th style={{ padding: '0.5rem' }}>Status</th>
-                        <th style={{ padding: '0.5rem' }}></th>
+                      <tr>
+                        <th>Employee</th>
+                        <th>Check-in rate</th>
+                        <th>Tasks done</th>
+                        <th>Overdue</th>
+                        <th>Status</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
                       {review.map((r) => (
-                        <tr key={r.employee.id} className={r.flagged ? 'review-row-flagged' : ''}
-                          style={{ borderBottom: '1px solid var(--border, #e2e8f0)' }}>
-                          <td style={{ padding: '0.5rem' }}>{r.employee.full_name}</td>
-                          <td style={{ padding: '0.5rem' }}>{Math.round(r.checkin_rate * 100)}%</td>
-                          <td style={{ padding: '0.5rem' }}>{r.tasks_done} / {r.tasks_total}</td>
-                          <td style={{ padding: '0.5rem' }}>{r.tasks_overdue_incomplete}</td>
-                          <td style={{ padding: '0.5rem' }}>
+                        <tr key={r.employee.id} className={r.flagged ? 'review-row-flagged' : ''}>
+                          <td>{r.employee.full_name}</td>
+                          <td>{Math.round(r.checkin_rate * 100)}%</td>
+                          <td>{r.tasks_done} / {r.tasks_total}</td>
+                          <td>{r.tasks_overdue_incomplete}</td>
+                          <td>
                             {r.flagged
                               ? <span className="badge red">Needs attention</span>
                               : <span className="badge green">On track</span>}
                           </td>
-                          <td style={{ padding: '0.5rem' }}>
+                          <td>
                             <button className="btn-secondary" onClick={() => navigate(`/chat?with=${r.employee.user_id}`)}>
                               Message
                             </button>
@@ -481,7 +475,7 @@ export default function Sprints() {
                         </tr>
                       ))}
                       {review.length === 0 && (
-                        <tr><td colSpan={6} style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>No team members yet.</td></tr>
+                        <tr><td colSpan={6} className="muted-note">No team members yet.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -493,31 +487,31 @@ export default function Sprints() {
           {tab === 'overview' && isOverride && (
             <div className="content-panel">
               <h2>Every project, at a glance</h2>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <table className="data-table">
                 <thead>
-                  <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border, #e2e8f0)' }}>
-                    <th style={{ padding: '0.5rem' }}>Project</th>
-                    <th style={{ padding: '0.5rem' }}>Team lead</th>
-                    <th style={{ padding: '0.5rem' }}>Deadline</th>
-                    <th style={{ padding: '0.5rem' }}>Active sprint</th>
-                    <th style={{ padding: '0.5rem' }}>Completion</th>
-                    <th style={{ padding: '0.5rem' }}>Flagged</th>
+                  <tr>
+                    <th>Project</th>
+                    <th>Team lead</th>
+                    <th>Deadline</th>
+                    <th>Active sprint</th>
+                    <th>Completion</th>
+                    <th>Flagged</th>
                   </tr>
                 </thead>
                 <tbody>
                   {overview.map((p) => (
-                    <tr key={p.project_id} style={{ borderBottom: '1px solid var(--border, #e2e8f0)', cursor: 'pointer' }}
+                    <tr key={p.project_id} className="clickable-row"
                       onClick={() => { setProjectId(String(p.project_id)); setTab('board'); }}>
-                      <td style={{ padding: '0.5rem' }}><strong>{p.project_name}</strong></td>
-                      <td style={{ padding: '0.5rem' }}>{p.team_lead?.full_name || '—'}</td>
-                      <td style={{ padding: '0.5rem' }}>{p.deadline || '—'}</td>
-                      <td style={{ padding: '0.5rem' }}>{p.active_sprint?.name || '—'}</td>
-                      <td style={{ padding: '0.5rem' }}>
+                      <td><strong>{p.project_name}</strong></td>
+                      <td>{p.team_lead?.full_name || '—'}</td>
+                      <td>{p.deadline || '—'}</td>
+                      <td>{p.active_sprint?.name || '—'}</td>
+                      <td>
                         <div className="task-progress-bar" style={{ width: 100 }}>
                           <div className="task-progress-fill" style={{ width: `${Math.round(p.completion_rate * 100)}%` }} />
                         </div>
                       </td>
-                      <td style={{ padding: '0.5rem' }}>
+                      <td>
                         {p.flagged_count > 0
                           ? <span className="badge red">{p.flagged_count}</span>
                           : <span className="badge green">0</span>}
@@ -525,7 +519,7 @@ export default function Sprints() {
                     </tr>
                   ))}
                   {overview.length === 0 && (
-                    <tr><td colSpan={6} style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>No projects yet.</td></tr>
+                    <tr><td colSpan={6} className="muted-note">No projects yet.</td></tr>
                   )}
                 </tbody>
               </table>

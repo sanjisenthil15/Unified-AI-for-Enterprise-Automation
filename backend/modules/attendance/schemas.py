@@ -32,6 +32,7 @@ class LeaveRequest(BaseModel):
 
 class EmployeeBriefInfo(BaseModel):
     id: int
+    user_id: int
     employee_code: str
     job_title: str
     full_name: str

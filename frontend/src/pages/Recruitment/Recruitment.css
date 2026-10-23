@@ -136,6 +136,92 @@
 .badge.red    { background: #fee2e2; color: #991b1b; }
 .badge.purple { background: #ede9fe; color: #5b21b6; }
 
+/* Shared layout helpers — a flex-between header row above a panel's
+   content, and an inline row of form fields (used wherever a page needs
+   its own small form outside the standard .form-grid, e.g. a quick
+   filter bar or an inline create-form). */
+.panel-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.panel-header-row h2 {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.field-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.field-group-wide { min-width: 220px; }
+
+.tab-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.clickable-row { cursor: pointer; }
+
+.section-subheading {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.notification-row {
+  padding: 0.75rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.notification-row:last-child { border-bottom: none; }
+.notification-row:hover { background: #f8fafc; }
+.notification-row.unread { background: rgba(37, 99, 235, 0.05); }
+
+.success-panel { border-color: var(--success); }
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.temp-password-box {
+  font-family: monospace;
+  font-size: 1.1rem;
+  background: #f0fdf4;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  display: inline-block;
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.list-row:last-of-type { border-bottom: none; }
+.list-row-main { flex: 1; }
+
+.muted-note {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
 @media (max-width: 860px) {
   .stat-row { grid-template-columns: repeat(2, 1fr); }
 }

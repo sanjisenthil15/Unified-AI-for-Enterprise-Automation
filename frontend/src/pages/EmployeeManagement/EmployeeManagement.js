@@ -151,12 +151,12 @@ export default function EmployeeManagement() {
       {error && <div className="alert error">{error}</div>}
 
       {justOnboarded && (
-        <div className="content-panel" style={{ borderColor: '#166534' }}>
+        <div className="content-panel success-panel">
           <h2>✅ {justOnboarded.employee.user.full_name} onboarded</h2>
           <p>
             Share this one-time temporary password with them — it won't be shown again:
           </p>
-          <p style={{ fontFamily: 'monospace', fontSize: '1.1rem', background: '#f0fdf4', padding: '0.5rem 1rem', borderRadius: 6, display: 'inline-block' }}>
+          <p className="temp-password-box">
             {justOnboarded.temporary_password}
           </p>
           <div style={{ marginTop: '0.75rem' }}>
@@ -167,13 +167,13 @@ export default function EmployeeManagement() {
 
       <div className="content-panel">
         <h2>Departments</h2>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+        <div className="badge-row">
           {departments.map((d) => (
             <span key={d.id} className="badge blue">{d.name}</span>
           ))}
-          {!departments.length && <span style={{ color: 'var(--text-muted)' }}>No departments yet.</span>}
+          {!departments.length && <span className="muted-note">No departments yet.</span>}
         </div>
-        <form onSubmit={handleAddDepartment} style={{ display: 'flex', gap: '0.5rem' }}>
+        <form onSubmit={handleAddDepartment} className="field-row">
           <input
             className="field-input"
             placeholder="New department name"
@@ -186,12 +186,12 @@ export default function EmployeeManagement() {
 
       <div className="content-panel">
         <h2>Projects</h2>
-        {projects.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No projects yet.</p>}
+        {projects.length === 0 && <p className="muted-note">No projects yet.</p>}
         {projects.map((p) => (
-          <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 0', borderBottom: '1px solid var(--border, #e2e8f0)' }}>
-            <div style={{ flex: 1 }}>
+          <div key={p.id} className="list-row">
+            <div className="list-row-main">
               <strong>{p.name}</strong>
-              <span style={{ color: 'var(--text-muted)', marginLeft: '0.5rem' }}>
+              <span className="muted-note" style={{ marginLeft: '0.5rem' }}>
                 {p.member_count} member{p.member_count === 1 ? '' : 's'}
               </span>
               <div>
@@ -216,7 +216,7 @@ export default function EmployeeManagement() {
             </button>
           </div>
         ))}
-        <form onSubmit={handleAddProject} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', alignItems: 'center' }}>
+        <form onSubmit={handleAddProject} className="field-row" style={{ marginTop: '0.75rem' }}>
           <input
             className="field-input"
             placeholder="New project name"
@@ -235,8 +235,8 @@ export default function EmployeeManagement() {
       </div>
 
       <div className="content-panel">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-          <h2 style={{ margin: 0 }}>Employee directory</h2>
+        <div className="panel-header-row">
+          <h2>Employee directory</h2>
           <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
             {showForm ? 'Close' : '+ Onboard employee'}
           </button>
@@ -244,7 +244,7 @@ export default function EmployeeManagement() {
 
         {showForm && (
           <div className="job-form-box">
-            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '1rem' }}>Onboard a new employee</h3>
+            <h3 className="section-subheading" style={{ marginTop: 0 }}>Onboard a new employee</h3>
             <form onSubmit={handleOnboard}>
               <div className="form-grid">
                 <div className="field-group">
@@ -296,7 +296,7 @@ export default function EmployeeManagement() {
                   <input className="field-input" name="phone" value={form.phone} onChange={field} />
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+              <div className="field-row" style={{ marginTop: '1rem' }}>
                 <button type="submit" className="btn-primary" disabled={saving}>
                   {saving ? 'Onboarding…' : '+ Onboard employee'}
                 </button>
@@ -309,32 +309,32 @@ export default function EmployeeManagement() {
         {loading ? (
           <p>Loading…</p>
         ) : employees.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)' }}>No employees yet. Click "+ Onboard employee" to add one.</p>
+          <p className="muted-note">No employees yet. Click "+ Onboard employee" to add one.</p>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table className="data-table">
             <thead>
-              <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border, #e2e8f0)' }}>
-                <th style={{ padding: '0.5rem' }}>Name</th>
-                <th style={{ padding: '0.5rem' }}>Job title</th>
-                <th style={{ padding: '0.5rem' }}>Department</th>
-                <th style={{ padding: '0.5rem' }}>Project</th>
-                <th style={{ padding: '0.5rem' }}>Hire date</th>
-                <th style={{ padding: '0.5rem' }}>Status</th>
-                <th style={{ padding: '0.5rem' }}>Actions</th>
+              <tr>
+                <th>Name</th>
+                <th>Job title</th>
+                <th>Department</th>
+                <th>Project</th>
+                <th>Hire date</th>
+                <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {employees.map((emp) => (
-                <tr key={emp.id} style={{ borderBottom: '1px solid var(--border, #e2e8f0)' }}>
-                  <td style={{ padding: '0.5rem' }}>{emp.user.full_name}<br /><small style={{ color: 'var(--text-muted)' }}>{emp.user.email}</small></td>
-                  <td style={{ padding: '0.5rem' }}>{emp.job_title}</td>
-                  <td style={{ padding: '0.5rem' }}>{emp.department?.name || '—'}</td>
-                  <td style={{ padding: '0.5rem' }}>{emp.project?.name || '—'}</td>
-                  <td style={{ padding: '0.5rem' }}>{emp.hire_date}</td>
-                  <td style={{ padding: '0.5rem' }}>
+                <tr key={emp.id}>
+                  <td>{emp.user.full_name}<br /><small className="muted-note">{emp.user.email}</small></td>
+                  <td>{emp.job_title}</td>
+                  <td>{emp.department?.name || '—'}</td>
+                  <td>{emp.project?.name || '—'}</td>
+                  <td>{emp.hire_date}</td>
+                  <td>
                     <span className={`badge ${STATUS_BADGE[emp.status] || 'purple'}`}>{emp.status.replace('_', ' ')}</span>
                   </td>
-                  <td style={{ padding: '0.5rem' }}>
+                  <td>
                     <select
                       className="field-select"
                       value={emp.status}

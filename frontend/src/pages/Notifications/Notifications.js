@@ -58,30 +58,25 @@ export default function Notifications() {
       {error && <div className="alert error">{error}</div>}
 
       <div className="content-panel">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-          <h2 style={{ margin: 0 }}>All notifications</h2>
+        <div className="panel-header-row">
+          <h2>All notifications</h2>
           <button className="btn-secondary" onClick={handleMarkAllRead}>Mark all read</button>
         </div>
 
         {loading ? (
           <p>Loading…</p>
         ) : notifications.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)' }}>No notifications yet.</p>
+          <p className="muted-note">No notifications yet.</p>
         ) : (
           <div>
             {notifications.map((n) => (
               <div
                 key={n.id}
                 onClick={() => handleClick(n)}
-                style={{
-                  padding: '0.75rem 0.5rem',
-                  borderBottom: '1px solid var(--border, #e2e8f0)',
-                  cursor: 'pointer',
-                  background: n.read_at ? 'transparent' : 'rgba(37, 99, 235, 0.05)',
-                }}
+                className={`notification-row${n.read_at ? '' : ' unread'}`}
               >
                 <div>{n.message}</div>
-                <small style={{ color: 'var(--text-muted)' }}>{new Date(n.created_at).toLocaleString()}</small>
+                <small className="muted-note">{new Date(n.created_at).toLocaleString()}</small>
               </div>
             ))}
           </div>

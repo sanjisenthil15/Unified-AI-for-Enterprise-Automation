@@ -185,6 +185,7 @@ def get_employee_attendance(db: Session, employee_id: int, start_date: date | No
 def _employee_brief(employee: Employee) -> dict:
     return {
         "id": employee.id,
+        "user_id": employee.user_id,
         "employee_code": employee.employee_code,
         "job_title": employee.job_title,
         "full_name": employee.user.full_name,

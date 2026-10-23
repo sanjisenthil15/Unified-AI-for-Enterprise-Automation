@@ -19,6 +19,7 @@ import {
   updateResume, deleteResume,
   analyzeResumes, getRecruitmentStats,
 } from '../../api/recruitmentApi';
+import JOB_ROLE_TEMPLATES from '../../data/jobRoleTemplates';
 import '../Recruitment/Recruitment.css';
 import './HRDashboard.css';
 
@@ -141,6 +142,20 @@ export default function HRDashboard() {
 
   function handleJobField(e) {
     setJobForm(f => ({ ...f, [e.target.name]: e.target.value }));
+  }
+
+  function applyJobTemplate(e) {
+    const title = e.target.value;
+    if (!title) return;
+    const template = JOB_ROLE_TEMPLATES.find(t => t.title === title);
+    if (!template) return;
+    setJobForm({
+      title: template.title,
+      required_skills: template.requiredSkills,
+      experience_level: template.experienceLevel,
+      min_education: template.minEducation,
+      description: template.description,
+    });
   }
 
   async function handleSaveJob(e) {
@@ -393,6 +408,17 @@ export default function HRDashboard() {
               {editJobId ? `Edit Job #${editJobId}` : 'Create New Job Requirement'}
             </h3>
             {jobMsg && <div className={`alert ${jobMsg.type}`}>{jobMsg.text}</div>}
+            {!editJobId && (
+              <div className="field-group full-width" style={{ marginBottom: '1rem' }}>
+                <label>Start from a template</label>
+                <select className="field-select" onChange={applyJobTemplate} defaultValue="">
+                  <option value="">None — start blank</option>
+                  {JOB_ROLE_TEMPLATES.map(t => (
+                    <option key={t.title} value={t.title}>{t.title}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <form onSubmit={handleSaveJob}>
               <div className="form-grid">
                 <div className="field-group full-width">

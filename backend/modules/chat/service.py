@@ -263,7 +263,15 @@ def _get_group_or_404(db: Session, group_id: int) -> ChatGroup:
     return group
 
 
-def _assert_group_member(db: Session, group: ChatGroup, current_user: User) -> ChatGroupMember:
+def _assert_group_member(db: Session, group: ChatGroup, current_user: User) -> ChatGroupMember | None:
+    """Raises 403 unless the caller is an actual member of this group, or
+    admin/hr_manager (the same standing override used everywhere else in
+    this app — attendance, sprints, review — for viewing a team they're
+    not literally staffed on). Returns None for an override caller who
+    has no real ChatGroupMember row; every caller only uses the return
+    value for the assertion's side effect, not its content."""
+    if current_user.role.name in _OVERRIDE_ROLES:
+        return None
     member = (
         db.query(ChatGroupMember)
         .filter(ChatGroupMember.group_id == group.id, ChatGroupMember.user_id == current_user.id)
@@ -327,12 +335,18 @@ def create_group(db: Session, current_user: User, current_employee: Employee | N
 
 
 def list_groups(db: Session, current_user: User) -> list[dict]:
-    group_ids = [
-        m.group_id for m in db.query(ChatGroupMember).filter(ChatGroupMember.user_id == current_user.id).all()
-    ]
-    if not group_ids:
-        return []
-    groups = db.query(ChatGroup).options(joinedload(ChatGroup.project)).filter(ChatGroup.id.in_(group_ids)).all()
+    query = db.query(ChatGroup).options(joinedload(ChatGroup.project))
+    if current_user.role.name in _OVERRIDE_ROLES:
+        # Standing override, same as attendance/sprints/review: see every
+        # group, not just ones they were explicitly added to.
+        groups = query.order_by(ChatGroup.name).all()
+    else:
+        group_ids = [
+            m.group_id for m in db.query(ChatGroupMember).filter(ChatGroupMember.user_id == current_user.id).all()
+        ]
+        if not group_ids:
+            return []
+        groups = query.filter(ChatGroup.id.in_(group_ids)).all()
     return [_group_response(db, g, current_user) for g in groups]
 
 

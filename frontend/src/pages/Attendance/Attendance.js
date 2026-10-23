@@ -156,12 +156,12 @@ export default function Attendance() {
 
       {notOnboarded ? (
         <div className="content-panel">
-          <p style={{ color: 'var(--text-muted)' }}>No employee record yet — contact HR to be onboarded.</p>
+          <p className="muted-note">No employee record yet — contact HR to be onboarded.</p>
         </div>
       ) : (
         <>
           {canSeeTeamTab && (
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+            <div className="tab-bar">
               <button className={tab === 'me' ? 'btn-primary' : 'btn-secondary'} onClick={() => setTab('me')}>My Attendance</button>
               <button className={tab === 'team' ? 'btn-primary' : 'btn-secondary'} onClick={() => setTab('team')}>My Team</button>
             </div>
@@ -171,13 +171,13 @@ export default function Attendance() {
             <>
               <div className="content-panel">
                 <h2>Today</h2>
-                <p style={{ color: 'var(--text-muted)' }}>
+                <p className="muted-note">
                   {todayRecord?.check_in_at
                     ? `Checked in at ${new Date(todayRecord.check_in_at).toLocaleTimeString()}`
                     : 'Not checked in yet today.'}
                   {todayRecord?.check_out_at && ` — checked out at ${new Date(todayRecord.check_out_at).toLocaleTimeString()}`}
                 </p>
-                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <div className="field-row">
                   <button className="btn-primary" onClick={handleCheckIn} disabled={busy || !canCheckIn}>Check In</button>
                   <button className="btn-secondary" onClick={handleCheckOut} disabled={busy || !canCheckOut}>Check Out</button>
                   <button className="btn-secondary" onClick={() => setShowLeaveForm((v) => !v)}>
@@ -190,7 +190,7 @@ export default function Attendance() {
                 </div>
 
                 {showLeaveForm && (
-                  <form onSubmit={handleMarkLeave} style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                  <form onSubmit={handleMarkLeave} className="field-row" style={{ marginTop: '1rem' }}>
                     <div className="field-group">
                       <label>Start date</label>
                       <input className="field-input" type="date" value={leaveForm.startDate}
@@ -214,24 +214,24 @@ export default function Attendance() {
               <div className="content-panel">
                 <h2>History</h2>
                 {myRecords.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)' }}>No attendance recorded yet.</p>
+                  <p className="muted-note">No attendance recorded yet.</p>
                 ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <table className="data-table">
                     <thead>
-                      <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border, #e2e8f0)' }}>
-                        <th style={{ padding: '0.5rem' }}>Date</th>
-                        <th style={{ padding: '0.5rem' }}>Check in</th>
-                        <th style={{ padding: '0.5rem' }}>Check out</th>
-                        <th style={{ padding: '0.5rem' }}>Status</th>
+                      <tr>
+                        <th>Date</th>
+                        <th>Check in</th>
+                        <th>Check out</th>
+                        <th>Status</th>
                       </tr>
                     </thead>
                     <tbody>
                       {myRecords.map((r) => (
-                        <tr key={r.id} style={{ borderBottom: '1px solid var(--border, #e2e8f0)' }}>
-                          <td style={{ padding: '0.5rem' }}>{r.work_date}</td>
-                          <td style={{ padding: '0.5rem' }}>{r.check_in_at ? new Date(r.check_in_at).toLocaleTimeString() : '—'}</td>
-                          <td style={{ padding: '0.5rem' }}>{r.check_out_at ? new Date(r.check_out_at).toLocaleTimeString() : '—'}</td>
-                          <td style={{ padding: '0.5rem' }}><span className="badge blue">{r.status.replace('_', ' ')}</span></td>
+                        <tr key={r.id}>
+                          <td>{r.work_date}</td>
+                          <td>{r.check_in_at ? new Date(r.check_in_at).toLocaleTimeString() : '—'}</td>
+                          <td>{r.check_out_at ? new Date(r.check_out_at).toLocaleTimeString() : '—'}</td>
+                          <td><span className="badge blue">{r.status.replace('_', ' ')}</span></td>
                         </tr>
                       ))}
                     </tbody>
@@ -244,7 +244,7 @@ export default function Attendance() {
           {tab === 'team' && (
             <div className="content-panel">
               <h2>Team attendance</h2>
-              <div className="field-group" style={{ maxWidth: 320, marginBottom: '1rem' }}>
+              <div className="field-group field-group-wide" style={{ marginBottom: '1rem' }}>
                 <label>Project</label>
                 <select className="field-select" value={teamProjectId} onChange={(e) => setTeamProjectId(e.target.value)}>
                   <option value="">Select a project…</option>
@@ -254,22 +254,22 @@ export default function Attendance() {
 
               {teamProjectId && (
                 teamData.length === 0 ? (
-                  <p style={{ color: 'var(--text-muted)' }}>No team members yet.</p>
+                  <p className="muted-note">No team members yet.</p>
                 ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <table className="data-table">
                     <thead>
-                      <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border, #e2e8f0)' }}>
-                        <th style={{ padding: '0.5rem' }}>Employee</th>
-                        <th style={{ padding: '0.5rem' }}>Job title</th>
-                        <th style={{ padding: '0.5rem' }}>Check-in rate (30d)</th>
+                      <tr>
+                        <th>Employee</th>
+                        <th>Job title</th>
+                        <th>Check-in rate (30d)</th>
                       </tr>
                     </thead>
                     <tbody>
                       {teamData.map((entry) => (
-                        <tr key={entry.employee.id} style={{ borderBottom: '1px solid var(--border, #e2e8f0)' }}>
-                          <td style={{ padding: '0.5rem' }}>{entry.employee.full_name}</td>
-                          <td style={{ padding: '0.5rem' }}>{entry.employee.job_title}</td>
-                          <td style={{ padding: '0.5rem' }}>
+                        <tr key={entry.employee.id}>
+                          <td>{entry.employee.full_name}</td>
+                          <td>{entry.employee.job_title}</td>
+                          <td>
                             <span className={`badge ${RATE_BADGE(entry.checkin_rate)}`}>
                               {Math.round(entry.checkin_rate * 100)}%
                             </span>

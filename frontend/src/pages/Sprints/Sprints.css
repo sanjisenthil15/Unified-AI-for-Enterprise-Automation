@@ -51,6 +51,45 @@
   font-weight: 600;
 }
 
+.kanban-card-action {
+  margin-top: 0.5rem;
+  width: 100%;
+  font-size: 0.82rem;
+}
+
+.kanban-manage-toggle {
+  margin-top: 0.5rem;
+  width: 100%;
+  font-size: 0.78rem;
+}
+
+.kanban-manage-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.kanban-manage-panel select,
+.kanban-manage-panel input {
+  font-size: 0.78rem;
+  padding: 0.3rem;
+}
+
+.kanban-manage-due-row {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.kanban-manage-due-row input {
+  flex: 1;
+}
+
+.kanban-manage-due-row button {
+  font-size: 0.72rem;
+  padding: 0.3rem 0.5rem;
+}
+
 .task-progress-bar {
   height: 6px;
   border-radius: 999px;

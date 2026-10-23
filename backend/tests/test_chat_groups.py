@@ -111,3 +111,28 @@ def test_duplicate_channel_name_rejected(client, new_user, unique_email):
 
     r = client.post(f"{CHAT_BASE}/groups/{group['id']}/channels", headers=lead["headers"], json={"name": "general"})
     assert r.status_code == 409
+
+
+def test_admin_sees_and_can_post_in_groups_without_being_a_member(client, new_user, unique_email):
+    admin = new_user("Admin User")
+    project, lead = _make_project_with_lead(client, admin["headers"], unique_email)
+    member = _onboard(client, admin["headers"], _tag(unique_email, "member"), "Member", project_id=project["id"])
+
+    group = client.post(f"{CHAT_BASE}/groups", headers=lead["headers"], json={
+        "project_id": project["id"], "name": "Team Group", "member_user_ids": [member["user_id"]],
+    }).json()
+
+    # Admin never joined this group, but the standing override (same as
+    # attendance/sprints/review) means they can still see and use it.
+    groups = client.get(f"{CHAT_BASE}/groups", headers=admin["headers"]).json()
+    assert any(g["id"] == group["id"] for g in groups)
+
+    r = client.get(f"{CHAT_BASE}/groups/{group['id']}", headers=admin["headers"])
+    assert r.status_code == 200, r.text
+    general_channel_id = next(c["id"] for c in r.json()["channels"] if c["name"] == "general")
+
+    r = client.post(f"{CHAT_BASE}/channels/{general_channel_id}/messages", headers=admin["headers"], json={"body": "Checking in on the team."})
+    assert r.status_code == 201, r.text
+
+    messages = client.get(f"{CHAT_BASE}/channels/{general_channel_id}/messages", headers=lead["headers"]).json()
+    assert any(m["body"] == "Checking in on the team." for m in messages)
