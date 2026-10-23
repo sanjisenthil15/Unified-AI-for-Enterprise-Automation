@@ -10,7 +10,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  createSprint, createTask, getBurndown, getManagerReview, listSprints, listTasks, updateTask,
+  createSprint, createTask, generateWeeklySprints, getBurndown, getEnterpriseOverview,
+  getManagerReview, listSprints, listTasks, updateTask,
 } from '../../api/sprintsApi';
 import { getMyEmployeeRecord, listProjects } from '../../api/employeeApi';
 import { getTeamAttendance } from '../../api/attendanceApi';
@@ -59,6 +60,8 @@ export default function Sprints() {
   const [tab, setTab] = useState('board');
   const [manageTaskId, setManageTaskId] = useState(null);
   const [review, setReview] = useState([]);
+  const [overview, setOverview] = useState([]);
+  const [generating, setGenerating] = useState(false);
 
   const [showSprintForm, setShowSprintForm] = useState(false);
   const [sprintForm, setSprintForm] = useState({ name: '', startDate: '', endDate: '' });
@@ -135,6 +138,12 @@ export default function Sprints() {
     }
   }, [tab, projectId, isManager]);
 
+  useEffect(() => {
+    if (tab === 'overview' && isOverride) {
+      getEnterpriseOverview().then(setOverview).catch(() => setError('Could not load the enterprise overview.'));
+    }
+  }, [tab, isOverride]);
+
   async function handleCreateSprint(e) {
     e.preventDefault();
     try {
@@ -145,6 +154,19 @@ export default function Sprints() {
       setSprintId(sprint.id);
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not create sprint.');
+    }
+  }
+
+  async function handleGenerateWeekly() {
+    setGenerating(true);
+    setError('');
+    try {
+      await generateWeeklySprints(Number(projectId));
+      await loadSprints(projectId);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not generate weekly sprints.');
+    } finally {
+      setGenerating(false);
     }
   }
 
@@ -209,6 +231,7 @@ export default function Sprints() {
 
   const selectedSprint = sprints.find((s) => s.id === Number(sprintId));
   const maxBurndown = Math.max(1, ...burndown.map((b) => b.total));
+  const selectedProject = uniqueSelectableProjects.find((p) => p.id === Number(projectId));
 
   if (loading) {
     return (
@@ -253,6 +276,17 @@ export default function Sprints() {
               {isManager && projectId && (
                 <button className="btn-secondary" onClick={() => setShowSprintForm((v) => !v)}>
                   {showSprintForm ? 'Close' : '+ New sprint'}
+                </button>
+              )}
+              {isManager && projectId && selectedProject?.deadline && (
+                <button className="btn-secondary" onClick={handleGenerateWeekly} disabled={generating}
+                  title={`Fills weekly sprint shells up to ${selectedProject.deadline}`}>
+                  {generating ? 'Generating…' : '📅 Generate weekly sprints'}
+                </button>
+              )}
+              {isOverride && (
+                <button className={tab === 'overview' ? 'btn-primary' : 'btn-secondary'} onClick={() => setTab('overview')}>
+                  🏢 Enterprise Overview
                 </button>
               )}
             </div>
@@ -454,6 +488,48 @@ export default function Sprints() {
                 </div>
               )}
             </>
+          )}
+
+          {tab === 'overview' && isOverride && (
+            <div className="content-panel">
+              <h2>Every project, at a glance</h2>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border, #e2e8f0)' }}>
+                    <th style={{ padding: '0.5rem' }}>Project</th>
+                    <th style={{ padding: '0.5rem' }}>Team lead</th>
+                    <th style={{ padding: '0.5rem' }}>Deadline</th>
+                    <th style={{ padding: '0.5rem' }}>Active sprint</th>
+                    <th style={{ padding: '0.5rem' }}>Completion</th>
+                    <th style={{ padding: '0.5rem' }}>Flagged</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {overview.map((p) => (
+                    <tr key={p.project_id} style={{ borderBottom: '1px solid var(--border, #e2e8f0)', cursor: 'pointer' }}
+                      onClick={() => { setProjectId(String(p.project_id)); setTab('board'); }}>
+                      <td style={{ padding: '0.5rem' }}><strong>{p.project_name}</strong></td>
+                      <td style={{ padding: '0.5rem' }}>{p.team_lead?.full_name || '—'}</td>
+                      <td style={{ padding: '0.5rem' }}>{p.deadline || '—'}</td>
+                      <td style={{ padding: '0.5rem' }}>{p.active_sprint?.name || '—'}</td>
+                      <td style={{ padding: '0.5rem' }}>
+                        <div className="task-progress-bar" style={{ width: 100 }}>
+                          <div className="task-progress-fill" style={{ width: `${Math.round(p.completion_rate * 100)}%` }} />
+                        </div>
+                      </td>
+                      <td style={{ padding: '0.5rem' }}>
+                        {p.flagged_count > 0
+                          ? <span className="badge red">{p.flagged_count}</span>
+                          : <span className="badge green">0</span>}
+                      </td>
+                    </tr>
+                  ))}
+                  {overview.length === 0 && (
+                    <tr><td colSpan={6} style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>No projects yet.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           )}
         </>
       )}

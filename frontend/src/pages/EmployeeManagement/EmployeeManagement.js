@@ -37,6 +37,7 @@ export default function EmployeeManagement() {
   const [saving, setSaving] = useState(false);
   const [newDeptName, setNewDeptName] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectDeadline, setNewProjectDeadline] = useState('');
   const [leadPicks, setLeadPicks] = useState({}); // { [projectId]: employeeId }
   const [justOnboarded, setJustOnboarded] = useState(null); // { employee, temporary_password }
 
@@ -79,8 +80,9 @@ export default function EmployeeManagement() {
     e.preventDefault();
     if (!newProjectName.trim()) return;
     try {
-      await createProject({ name: newProjectName.trim() });
+      await createProject({ name: newProjectName.trim(), deadline: newProjectDeadline || null });
       setNewProjectName('');
+      setNewProjectDeadline('');
       load();
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not create project.');
@@ -196,6 +198,7 @@ export default function EmployeeManagement() {
                 {p.team_lead
                   ? <span className="badge green">Lead: {p.team_lead.user.full_name}</span>
                   : <span className="badge amber">No team lead assigned</span>}
+                {p.deadline && <span className="badge blue" style={{ marginLeft: '0.4rem' }}>Deadline: {p.deadline}</span>}
               </div>
             </div>
             <select
@@ -213,12 +216,19 @@ export default function EmployeeManagement() {
             </button>
           </div>
         ))}
-        <form onSubmit={handleAddProject} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+        <form onSubmit={handleAddProject} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', alignItems: 'center' }}>
           <input
             className="field-input"
             placeholder="New project name"
             value={newProjectName}
             onChange={(e) => setNewProjectName(e.target.value)}
+          />
+          <input
+            className="field-input"
+            type="date"
+            title="Deadline (optional)"
+            value={newProjectDeadline}
+            onChange={(e) => setNewProjectDeadline(e.target.value)}
           />
           <button type="submit" className="btn-secondary">+ Add project</button>
         </form>

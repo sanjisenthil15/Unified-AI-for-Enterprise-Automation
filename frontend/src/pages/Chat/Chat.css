@@ -1,4 +1,4 @@
-/* Chat — two-pane contact list + thread view. */
+/* Chat — Groups + Channels + Direct Messages, side by side with a thread view. */
 
 .chat-layout {
   display: flex;
@@ -15,6 +15,93 @@
   overflow-y: auto;
   background: #f8fafc;
   flex-shrink: 0;
+}
+
+.chat-channels {
+  width: 200px;
+  border-right: 1px solid var(--border, #e2e8f0);
+  overflow-y: auto;
+  background: #f1f5f9;
+  flex-shrink: 0;
+  padding-bottom: 0.5rem;
+}
+
+.chat-sidebar-section {
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+.chat-sidebar-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.chat-sidebar-add {
+  background: none;
+  border: none;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--primary);
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 0.2rem;
+}
+
+.chat-empty-hint {
+  padding: 0 0.9rem 0.75rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.chat-new-group-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0 0.9rem 0.9rem;
+}
+
+.chat-new-group-form select,
+.chat-new-group-form input {
+  font-size: 0.82rem;
+}
+
+.chat-member-picker {
+  max-height: 120px;
+  overflow-y: auto;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 6px;
+  padding: 0.4rem;
+  background: #fff;
+}
+
+.chat-member-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  padding: 0.2rem 0;
+}
+
+.chat-new-channel-form {
+  padding: 0.5rem 0.9rem 0;
+}
+
+.chat-new-channel-form input {
+  font-size: 0.8rem;
+}
+
+.chat-bubble-sender {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--primary);
+  margin-bottom: 0.15rem;
 }
 
 .chat-contact-item {

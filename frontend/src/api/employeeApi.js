@@ -81,8 +81,8 @@ export async function listProjects() {
   return res.data;
 }
 
-export async function createProject({ name, description }) {
-  const res = await axiosInstance.post(`${BASE}/projects`, { name, description });
+export async function createProject({ name, description, deadline }) {
+  const res = await axiosInstance.post(`${BASE}/projects`, { name, description, deadline: deadline || null });
   return res.data;
 }
 

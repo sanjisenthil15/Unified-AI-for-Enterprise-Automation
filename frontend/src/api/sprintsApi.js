@@ -75,3 +75,13 @@ export async function getBurndown(sprintId) {
   const res = await axiosInstance.get(`${BASE}/${sprintId}/burndown`);
   return res.data;
 }
+
+export async function generateWeeklySprints(projectId) {
+  const res = await axiosInstance.post(`${BASE}/generate-weekly`, { project_id: projectId });
+  return res.data;
+}
+
+export async function getEnterpriseOverview() {
+  const res = await axiosInstance.get(`${BASE}/overview`);
+  return res.data;
+}
