@@ -19,6 +19,10 @@ import '../Recruitment/Recruitment.css';
 import '../HRDashboard/HRDashboard.css';
 import './Sprints.css';
 
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function currentRole() {
   try {
     const user = JSON.parse(localStorage.getItem('user'));
@@ -53,6 +57,7 @@ export default function Sprints() {
   const [members, setMembers] = useState([]);
   const [burndown, setBurndown] = useState([]);
   const [tab, setTab] = useState('board');
+  const [manageTaskId, setManageTaskId] = useState(null);
   const [review, setReview] = useState([]);
 
   const [showSprintForm, setShowSprintForm] = useState(false);
@@ -165,9 +170,13 @@ export default function Sprints() {
     }
   }
 
-  async function handleTaskProgress(taskId, progressPercent) {
+  async function handleToggleDone(task) {
     try {
-      await updateTask(taskId, { progressPercent });
+      if (task.status === 'done') {
+        await updateTask(task.id, { status: 'todo', progressPercent: 0 });
+      } else {
+        await updateTask(task.id, { status: 'done' });
+      }
       loadTasks(sprintId);
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not update task.');
@@ -181,6 +190,21 @@ export default function Sprints() {
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not reassign task.');
     }
+  }
+
+  async function handleDueDateChange(taskId, dueDate) {
+    try {
+      await updateTask(taskId, { dueDate: dueDate || null });
+      loadTasks(sprintId);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not update due date.');
+    }
+  }
+
+  function handleExtendTwoDays(task) {
+    const base = task.due_date ? new Date(task.due_date) : new Date();
+    base.setDate(base.getDate() + 2);
+    handleDueDateChange(task.id, base.toISOString().slice(0, 10));
   }
 
   const selectedSprint = sprints.find((s) => s.id === Number(sprintId));
@@ -319,35 +343,65 @@ export default function Sprints() {
                         <div className="kanban-column-title">{col.label} ({tasks.filter((t) => t.status === col.key).length})</div>
                         {tasks.filter((t) => t.status === col.key).map((task) => {
                           const isMine = myEmployee && task.assignee?.id === myEmployee.id;
-                          const canEdit = isMine || isManager;
+                          const isOverdue = task.due_date && task.status !== 'done' && task.due_date < todayStr();
+                          const managing = manageTaskId === task.id;
                           return (
                             <div className="kanban-card" key={task.id}>
                               <div className="kanban-card-title">{task.title}</div>
                               <div className="kanban-card-meta">
-                                {task.assignee?.full_name || 'Unassigned'}{task.due_date && ` · due ${task.due_date}`}
+                                {task.assignee?.full_name || 'Unassigned'}
+                                {task.due_date && (
+                                  <span className={isOverdue ? 'kanban-overdue' : ''}> · due {task.due_date}</span>
+                                )}
                               </div>
                               <div className="task-progress-bar">
                                 <div className="task-progress-fill" style={{ width: `${task.progress_percent}%` }} />
                               </div>
-                              {canEdit && (
-                                <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.4rem', flexWrap: 'wrap' }}>
-                                  <select className="field-select" value={task.status}
-                                    onChange={(e) => handleTaskStatus(task.id, e.target.value)}
-                                    style={{ fontSize: '0.78rem', padding: '0.2rem 0.4rem' }}>
-                                    {TASK_COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-                                  </select>
-                                  <input type="number" min="0" max="100" value={task.progress_percent}
-                                    onChange={(e) => handleTaskProgress(task.id, Number(e.target.value))}
-                                    className="field-input" style={{ width: 60, fontSize: '0.78rem', padding: '0.2rem 0.4rem' }} />
-                                  {isManager && (
-                                    <select className="field-select" value={task.assignee?.id || ''}
-                                      onChange={(e) => handleReassign(task.id, e.target.value)}
-                                      style={{ fontSize: '0.78rem', padding: '0.2rem 0.4rem' }}>
-                                      <option value="">Unassigned</option>
-                                      {members.map((m) => <option key={m.id} value={m.id}>{m.full_name}</option>)}
-                                    </select>
+
+                              {isMine && !isManager && (
+                                <button
+                                  className={task.status === 'done' ? 'btn-secondary' : 'btn-primary'}
+                                  style={{ marginTop: '0.5rem', width: '100%' }}
+                                  onClick={() => handleToggleDone(task)}
+                                >
+                                  {task.status === 'done' ? '↺ Reopen' : '✓ Mark Done'}
+                                </button>
+                              )}
+
+                              {isManager && (
+                                <>
+                                  <button
+                                    className="btn-secondary"
+                                    style={{ marginTop: '0.5rem', width: '100%', fontSize: '0.78rem' }}
+                                    onClick={() => setManageTaskId(managing ? null : task.id)}
+                                  >
+                                    {managing ? 'Close' : 'Manage'}
+                                  </button>
+                                  {managing && (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.5rem' }}>
+                                      <select className="field-select" value={task.status}
+                                        onChange={(e) => handleTaskStatus(task.id, e.target.value)}
+                                        style={{ fontSize: '0.78rem', padding: '0.3rem' }}>
+                                        {TASK_COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                                      </select>
+                                      <select className="field-select" value={task.assignee?.id || ''}
+                                        onChange={(e) => handleReassign(task.id, e.target.value)}
+                                        style={{ fontSize: '0.78rem', padding: '0.3rem' }}>
+                                        <option value="">Unassigned</option>
+                                        {members.map((m) => <option key={m.id} value={m.id}>{m.full_name}</option>)}
+                                      </select>
+                                      <div style={{ display: 'flex', gap: '0.3rem' }}>
+                                        <input type="date" className="field-input" value={task.due_date || ''}
+                                          onChange={(e) => handleDueDateChange(task.id, e.target.value)}
+                                          style={{ fontSize: '0.78rem', padding: '0.3rem', flex: 1 }} />
+                                        <button className="btn-secondary" style={{ fontSize: '0.72rem', padding: '0.3rem 0.5rem' }}
+                                          onClick={() => handleExtendTwoDays(task)}>
+                                          +2 days
+                                        </button>
+                                      </div>
+                                    </div>
                                   )}
-                                </div>
+                                </>
                               )}
                             </div>
                           );

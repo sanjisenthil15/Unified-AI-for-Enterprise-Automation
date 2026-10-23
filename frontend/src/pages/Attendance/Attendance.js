@@ -181,8 +181,12 @@ export default function Attendance() {
                   <button className="btn-primary" onClick={handleCheckIn} disabled={busy || !canCheckIn}>Check In</button>
                   <button className="btn-secondary" onClick={handleCheckOut} disabled={busy || !canCheckOut}>Check Out</button>
                   <button className="btn-secondary" onClick={() => setShowLeaveForm((v) => !v)}>
-                    {showLeaveForm ? 'Close' : 'Mark leave'}
+                    {showLeaveForm ? 'Close' : 'Plan time off'}
                   </button>
+                </div>
+
+                <div className="alert info" style={{ marginTop: '0.75rem' }}>
+                  Planning time off? Mark it here so those days don't count against your check-in rate in your manager's team review.
                 </div>
 
                 {showLeaveForm && (

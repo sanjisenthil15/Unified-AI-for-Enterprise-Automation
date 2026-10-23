@@ -46,6 +46,11 @@
   margin-bottom: 0.4rem;
 }
 
+.kanban-overdue {
+  color: #dc2626;
+  font-weight: 600;
+}
+
 .task-progress-bar {
   height: 6px;
   border-radius: 999px;
