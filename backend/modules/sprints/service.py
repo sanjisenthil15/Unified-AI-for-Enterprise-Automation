@@ -17,7 +17,7 @@ from models.sprint_task import SprintTask
 from models.sprint_task_snapshot import SprintTaskSnapshot
 from models.user import User
 
-from modules.attendance.service import compute_checkin_rate
+from modules.attendance.service import compute_checkin_rates_for_employees
 from modules.notifications.service import create_notification
 
 # A single bad day shouldn't flag someone; a sustained pattern should.
@@ -92,24 +92,34 @@ def create_sprint(db: Session, current_user: User, current_employee: Employee | 
 
 
 def generate_weekly_sprints(db: Session, current_user: User, current_employee: Employee | None, project_id: int) -> list[Sprint]:
-    """Fills weekly Sprint *shells* (named "Week N") from today (or the
-    last existing sprint's end_date, for idempotency) up to the project's
-    deadline — it does not invent task content, only the schedule. The
-    manager still creates the actual tasks, manually or by converting
-    meeting action items (see modules/meeting_intelligence)."""
+    """Fills weekly Sprint *shells* up to the project's deadline (manual
+    re-trigger, e.g. to fill the gap after a deadline is pushed out).
+    Authorization wrapper around _generate_weekly_sprints_for_project —
+    see that function for what it actually does."""
     project = _get_project(db, project_id)
     if not _is_manager(current_user, current_employee, project):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only this project's team lead (or admin/hr_manager) can generate sprints.")
     if project.deadline is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "This project has no deadline set yet — set one first.")
+    return _generate_weekly_sprints_for_project(db, project, current_employee)
 
+
+def _generate_weekly_sprints_for_project(db: Session, project: Project, current_employee: Employee | None) -> list[Sprint]:
+    """Fills weekly Sprint *shells* (named "Week N") from today (or the
+    last existing sprint's end_date, for idempotency) up to the project's
+    deadline — it does not invent task content, only the schedule. The
+    manager still creates the actual tasks, manually or by converting
+    meeting action items (see modules/meeting_intelligence). No
+    authorization check here — callers are either generate_weekly_sprints
+    (checked above) or employee_management.service.create_project, which
+    is already behind an admin/hr_manager-only route."""
     last_sprint = (
         db.query(Sprint)
-        .filter(Sprint.project_id == project_id)
+        .filter(Sprint.project_id == project.id)
         .order_by(Sprint.end_date.desc())
         .first()
     )
-    existing_count = db.query(Sprint).filter(Sprint.project_id == project_id).count()
+    existing_count = db.query(Sprint).filter(Sprint.project_id == project.id).count()
     cursor = (last_sprint.end_date + timedelta(days=1)) if last_sprint else datetime.utcnow().date()
 
     created = []
@@ -330,11 +340,24 @@ def build_manager_review(
     start = start_date or (end - timedelta(days=7))
     today = datetime.utcnow().date()
 
-    members = db.query(Employee).filter(Employee.project_id == project_id, Employee.deleted_at.is_(None)).all()
+    members = db.query(Employee).options(joinedload(Employee.user)).filter(
+        Employee.project_id == project_id, Employee.deleted_at.is_(None),
+    ).all()
+    member_ids = [m.id for m in members]
+
+    # Two queries total for the whole team, not two per member.
+    checkin_rates = compute_checkin_rates_for_employees(db, member_ids, start, end)
+    all_tasks = db.query(SprintTask).join(Sprint).filter(Sprint.project_id == project_id).all()
+    tasks_by_assignee: dict[int, list[SprintTask]] = {}
+    for t in all_tasks:
+        if t.assignee_id is not None:
+            tasks_by_assignee.setdefault(t.assignee_id, []).append(t)
+
     entries = []
+    all_overdue_tasks = []
     for member in members:
-        checkin_rate = compute_checkin_rate(db, member.id, start, end)
-        tasks = db.query(SprintTask).join(Sprint).filter(SprintTask.assignee_id == member.id, Sprint.project_id == project_id).all()
+        checkin_rate = checkin_rates.get(member.id, 1.0)
+        tasks = tasks_by_assignee.get(member.id, [])
         tasks_total = len(tasks)
         tasks_done = len([t for t in tasks if t.status == "done"])
         overdue_tasks = [t for t in tasks if t.status != "done" and t.due_date is not None and t.due_date < today]
@@ -342,7 +365,7 @@ def build_manager_review(
         completion_rate = (tasks_done / tasks_total) if tasks_total else 0.0
         flagged = checkin_rate < ATTENDANCE_FLAG_THRESHOLD or tasks_overdue_incomplete >= OVERDUE_TASK_FLAG_THRESHOLD
 
-        _notify_newly_overdue(db, project, overdue_tasks)
+        all_overdue_tasks.extend(overdue_tasks)
 
         entries.append({
             "employee": {"id": member.id, "user_id": member.user_id, "employee_code": member.employee_code, "full_name": member.user.full_name},
@@ -353,6 +376,8 @@ def build_manager_review(
             "completion_rate": completion_rate,
             "flagged": flagged,
         })
+
+    _notify_newly_overdue(db, project, all_overdue_tasks)
 
     entries.sort(key=lambda e: e["flagged"], reverse=True)
     return entries
@@ -366,29 +391,47 @@ def build_enterprise_overview(db: Session) -> list[dict]:
     """Every project at a glance — team lead, deadline, active sprint,
     aggregate task completion, and flagged-employee count. Admin/hr_manager
     only (enforced in the router via require_roles, not a per-project check
-    — this view is explicitly enterprise-wide)."""
+    — this view is explicitly enterprise-wide).
+
+    Deliberately batched into a handful of queries total rather than
+    per-project/per-employee — on a hosted Postgres instance where every
+    round-trip pays real network latency, looping one query per employee
+    across every project in the company made this page the single
+    slowest thing in the app."""
     projects = db.query(Project).options(joinedload(Project.team_lead).joinedload(Employee.user)).order_by(Project.name).all()
     today = datetime.utcnow().date()
+    week_start = today - timedelta(days=7)
+
+    all_members = db.query(Employee).filter(Employee.project_id.isnot(None), Employee.deleted_at.is_(None)).all()
+    members_by_project: dict[int, list[Employee]] = {}
+    for m in all_members:
+        members_by_project.setdefault(m.project_id, []).append(m)
+
+    checkin_rates = compute_checkin_rates_for_employees(db, [m.id for m in all_members], week_start, today)
+
+    all_tasks_with_project = db.query(SprintTask, Sprint.project_id).join(Sprint).all()
+    tasks_by_project: dict[int, list[SprintTask]] = {}
+    for task, project_id in all_tasks_with_project:
+        tasks_by_project.setdefault(project_id, []).append(task)
+
+    active_sprints = db.query(Sprint).filter(Sprint.status == "active").order_by(Sprint.end_date).all()
+    active_sprint_by_project: dict[int, Sprint] = {}
+    for s in active_sprints:
+        active_sprint_by_project.setdefault(s.project_id, s)
 
     overview = []
     for project in projects:
-        member_count = db.query(Employee).filter(Employee.project_id == project.id, Employee.deleted_at.is_(None)).count()
-        active_sprint = (
-            db.query(Sprint)
-            .filter(Sprint.project_id == project.id, Sprint.status == "active")
-            .order_by(Sprint.end_date)
-            .first()
-        )
+        members = members_by_project.get(project.id, [])
+        tasks = tasks_by_project.get(project.id, [])
+        active_sprint = active_sprint_by_project.get(project.id)
 
-        tasks = db.query(SprintTask).join(Sprint).filter(Sprint.project_id == project.id).all()
         tasks_total = len(tasks)
         tasks_done = len([t for t in tasks if t.status == "done"])
         completion_rate = (tasks_done / tasks_total) if tasks_total else 0.0
 
         flagged_count = 0
-        for member in db.query(Employee).filter(Employee.project_id == project.id, Employee.deleted_at.is_(None)).all():
-            start = today - timedelta(days=7)
-            checkin_rate = compute_checkin_rate(db, member.id, start, today)
+        for member in members:
+            checkin_rate = checkin_rates.get(member.id, 1.0)
             overdue = len([
                 t for t in tasks
                 if t.assignee_id == member.id and t.status != "done" and t.due_date is not None and t.due_date < today
@@ -404,7 +447,7 @@ def build_enterprise_overview(db: Session) -> list[dict]:
                 {"id": project.team_lead.id, "full_name": project.team_lead.user.full_name}
                 if project.team_lead else None
             ),
-            "member_count": member_count,
+            "member_count": len(members),
             "active_sprint": (
                 {"id": active_sprint.id, "name": active_sprint.name, "end_date": active_sprint.end_date}
                 if active_sprint else None

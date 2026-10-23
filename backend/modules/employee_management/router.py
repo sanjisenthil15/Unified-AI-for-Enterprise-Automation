@@ -23,7 +23,8 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from config.database import get_db
-from core.dependencies import get_current_user, require_roles
+from core.dependencies import get_current_employee_optional, get_current_user, require_roles
+from models.employee import Employee
 from models.user import User
 
 from modules.employee_management.schemas import (
@@ -167,8 +168,9 @@ def create_project(
     payload: ProjectCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_roles(_MANAGE_ROLES)),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
 ):
-    return service.create_project(db, payload)
+    return service.create_project(db, payload, current_employee)
 
 
 @router.post(

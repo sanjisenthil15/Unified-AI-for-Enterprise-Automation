@@ -173,24 +173,24 @@ def test_generate_weekly_sprints_fills_to_deadline_idempotently(client, new_user
     login = client.post("/api/v1/auth/login", json={"email": lead_email, "password": temp_password})
     lead_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
-    # A plain employee cannot generate sprints.
+    # Setting a deadline at project creation auto-generates the weekly
+    # shells right away — "add sprint by itself," no button click needed.
+    auto_generated = client.get(SPR_BASE, headers=lead_headers, params={"project_id": project["id"]}).json()
+    assert len(auto_generated) > 0
+    assert auto_generated[0]["end_date"] == "2027-01-15"
+
+    # A plain employee cannot manually (re-)generate sprints.
     outsider = _onboard(client, admin["headers"], _tag(unique_email, "outsider"), "Outsider")
     r = client.post(f"{SPR_BASE}/generate-weekly", headers=outsider["headers"], json={"project_id": project["id"]})
     assert r.status_code == 403
 
-    r = client.post(f"{SPR_BASE}/generate-weekly", headers=lead_headers, json={"project_id": project["id"]})
-    assert r.status_code == 200, r.text
-    first_batch = r.json()
-    assert len(first_batch) > 0
-    assert first_batch[-1]["end_date"] == "2027-01-15"
-
-    # Re-running fills nothing further — the deadline is already covered.
+    # The manual endpoint is idempotent — the deadline is already fully covered.
     r = client.post(f"{SPR_BASE}/generate-weekly", headers=lead_headers, json={"project_id": project["id"]})
     assert r.status_code == 200, r.text
     assert r.json() == []
 
     all_sprints = client.get(SPR_BASE, headers=lead_headers, params={"project_id": project["id"]}).json()
-    assert len(all_sprints) == len(first_batch)
+    assert len(all_sprints) == len(auto_generated)
 
 
 def test_enterprise_overview_is_admin_only(client, new_user, unique_email):

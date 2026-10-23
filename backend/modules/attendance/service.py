@@ -116,14 +116,7 @@ def list_my_attendance(db: Session, employee_id: int, start_date: date | None, e
     )
 
 
-def compute_checkin_rate(db: Session, employee_id: int, start_date: date, end_date: date) -> float:
-    """Fraction of expected business days (Mon-Fri, excluding on_leave days)
-    the employee actually checked in on, over [start_date, end_date]."""
-    records = (
-        db.query(Attendance)
-        .filter(Attendance.employee_id == employee_id, Attendance.work_date >= start_date, Attendance.work_date <= end_date)
-        .all()
-    )
+def _checkin_rate_from_records(records: list[Attendance], start_date: date, end_date: date) -> float:
     on_leave_dates = {r.work_date for r in records if r.status == "on_leave"}
     checked_in_dates = {r.work_date for r in records if r.check_in_at is not None}
 
@@ -138,6 +131,41 @@ def compute_checkin_rate(db: Session, employee_id: int, start_date: date, end_da
         return 1.0
     checked_in_business_days = len([d for d in checked_in_dates if d.weekday() < 5])
     return checked_in_business_days / business_days
+
+
+def compute_checkin_rate(db: Session, employee_id: int, start_date: date, end_date: date) -> float:
+    """Fraction of expected business days (Mon-Fri, excluding on_leave days)
+    the employee actually checked in on, over [start_date, end_date]."""
+    records = (
+        db.query(Attendance)
+        .filter(Attendance.employee_id == employee_id, Attendance.work_date >= start_date, Attendance.work_date <= end_date)
+        .all()
+    )
+    return _checkin_rate_from_records(records, start_date, end_date)
+
+
+def compute_checkin_rates_for_employees(
+    db: Session, employee_ids: list[int], start_date: date, end_date: date,
+) -> dict[int, float]:
+    """Batched compute_checkin_rate — one query for every employee instead
+    of one query each. Used by the review/overview endpoints, which
+    otherwise N+1 (one round-trip per team member); on a hosted Postgres
+    with real network latency per round-trip, that N+1 is the dominant
+    cost of loading those pages."""
+    if not employee_ids:
+        return {}
+    records = (
+        db.query(Attendance)
+        .filter(Attendance.employee_id.in_(employee_ids), Attendance.work_date >= start_date, Attendance.work_date <= end_date)
+        .all()
+    )
+    by_employee: dict[int, list[Attendance]] = {eid: [] for eid in employee_ids}
+    for r in records:
+        by_employee.setdefault(r.employee_id, []).append(r)
+    return {
+        eid: _checkin_rate_from_records(recs, start_date, end_date)
+        for eid, recs in by_employee.items()
+    }
 
 
 def get_employee_attendance(db: Session, employee_id: int, start_date: date | None, end_date: date | None) -> dict:

@@ -197,7 +197,7 @@ def get_project(db: Session, project_id: int) -> Project:
     return _with_member_count(db, project)
 
 
-def create_project(db: Session, payload) -> Project:
+def create_project(db: Session, payload, current_employee=None) -> Project:
     existing = db.query(Project).filter(Project.name == payload.name).first()
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "A project with this name already exists.")
@@ -205,6 +205,15 @@ def create_project(db: Session, payload) -> Project:
     db.add(project)
     db.commit()
     db.refresh(project)
+
+    if project.deadline is not None:
+        # "Add sprint by itself" — a deadline means the weekly schedule
+        # should exist immediately, not wait for someone to click a
+        # separate "generate" button. Re-running generate-weekly later
+        # (e.g. after the deadline is pushed out) just fills the gap.
+        from modules.sprints.service import _generate_weekly_sprints_for_project
+        _generate_weekly_sprints_for_project(db, project, current_employee)
+
     return get_project(db, project.id)
 
 

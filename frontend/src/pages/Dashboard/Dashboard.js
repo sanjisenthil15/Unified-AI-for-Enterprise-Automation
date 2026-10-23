@@ -1,12 +1,11 @@
 /**
  * pages/Dashboard/Dashboard.js
  *
- * Presentation-only dashboard.
- * Displays 6 enterprise module cards — all static, no API calls.
- * Clicking "Back to Login" returns to the login page.
+ * Landing page: 6 enterprise module cards, each navigating to its module.
  */
 
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import './Dashboard.css';
 
 /**
@@ -30,6 +29,7 @@ const MODULES = [
       'Automate resume screening, rank candidates by fit score, and schedule interviews with AI-driven insights.',
     colorClass: 'card-recruitment',
     status: 'Active',
+    to: '/hr',
   },
   {
     id: 'support',
@@ -39,6 +39,7 @@ const MODULES = [
       'AI-powered ticket management with automatic replies, priority triage, and real-time escalation detection.',
     colorClass: 'card-support',
     status: 'Active',
+    to: '/customer-support',
   },
   {
     id: 'incident',
@@ -48,6 +49,7 @@ const MODULES = [
       'Log, triage, and resolve incidents faster. AI suggests severity levels and assigns the right team automatically.',
     colorClass: 'card-incident',
     status: 'Active',
+    to: '/incidents',
   },
   {
     id: 'meeting',
@@ -57,6 +59,7 @@ const MODULES = [
       'Upload audio recordings. Get Whisper transcriptions, Gemini summaries, and action-item extraction instantly.',
     colorClass: 'card-meeting',
     status: 'Active',
+    to: '/meetings',
   },
   {
     id: 'analytics',
@@ -66,6 +69,7 @@ const MODULES = [
       'Cross-module KPIs, trend charts, and real-time metrics visualised with Recharts for data-driven decisions.',
     colorClass: 'card-analytics',
     status: 'Active',
+    to: '/analytics',
   },
   {
     id: 'employee',
@@ -75,10 +79,13 @@ const MODULES = [
       'Manage employee profiles, departments, and roles. AI-generated performance insights keep HR proactive.',
     colorClass: 'card-employee',
     status: 'Active',
+    to: '/employees',
   },
 ];
 
 export default function Dashboard() {
+  const navigate = useNavigate();
+
   return (
     <div className="dashboard-page">
 
@@ -105,8 +112,10 @@ export default function Dashboard() {
               role="listitem"
               tabIndex={0}
               aria-label={`${mod.title} module`}
+              onClick={() => navigate(mod.to)}
               /* Keyboard accessibility — Enter activates the card */
-              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.click()}
+              onKeyDown={(e) => e.key === 'Enter' && navigate(mod.to)}
+              style={{ cursor: 'pointer' }}
             >
               {/* Icon */}
               <div className="card-icon-wrap" aria-hidden="true">
