@@ -24,18 +24,33 @@ from config.database import SessionLocal, engine  # noqa: E402
 from main import app  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
-TEST_EMAIL_LIKE = "pytest\\_%@example.com"
+TEST_EMAIL_LIKE = "%pytest%"
 
 
 def _cleanup_test_rows() -> None:
-    """Remove any rows created by tests (identified by the pytest_*@example.com email)."""
+    """Remove any rows created by tests (identified by the pytest_*@example.com email).
+
+    Uses a plain substring LIKE (no ESCAPE clause) — an ESCAPE-based
+    anchored pattern here previously matched zero rows under Postgres
+    (confirmed by direct repro: a freshly inserted
+    'pytest_probe@example.com' row did not match
+    "pytest\\_%@example.com" ESCAPE '\\'), silently leaving every test
+    run's rows in the database. "pytest" never appears in real data, so
+    a simple substring match is both correct and actually works.
+    """
     with engine.begin() as conn:
+        # sprints.project_id is ON DELETE RESTRICT — must clear sprints (and their
+        # cascading tasks/snapshots) before the projects they belong to.
+        conn.execute(text(
+            "DELETE FROM sprints WHERE project_id IN "
+            "(SELECT id FROM projects WHERE name LIKE 'Project %pytest%')"
+        ))
         # Test project names embed the test's unique_email, e.g. "Project pytest_xyz@example.com"
-        conn.execute(text("DELETE FROM projects WHERE name LIKE 'Project pytest\\_%' ESCAPE '\\'"))
+        conn.execute(text("DELETE FROM projects WHERE name LIKE 'Project %pytest%'"))
 
         user_ids = [
             r[0] for r in conn.execute(
-                text("SELECT id FROM users WHERE email LIKE :p ESCAPE '\\'"),
+                text("SELECT id FROM users WHERE email LIKE :p"),
                 {"p": TEST_EMAIL_LIKE},
             )
         ]
@@ -48,6 +63,24 @@ def _cleanup_test_rows() -> None:
         conn.execute(text("DELETE FROM job_postings WHERE created_by = ANY(:ids)"), {"ids": user_ids})
         # meeting children cascade from meetings (ON DELETE CASCADE)
         conn.execute(text("DELETE FROM meetings WHERE created_by = ANY(:ids)"), {"ids": user_ids})
+        # manager_chat_threads.{employee_id,manager_user_id} are ON DELETE RESTRICT
+        # — messages cascade from the thread, but the thread itself must go first.
+        conn.execute(text(
+            "DELETE FROM manager_chat_threads WHERE manager_user_id = ANY(:ids) OR employee_id IN "
+            "(SELECT id FROM employees WHERE user_id = ANY(:ids))"
+        ), {"ids": user_ids})
+        # attendance_records.employee_id and sprints.created_by are ON DELETE RESTRICT/SET NULL
+        # respectively — clear attendance before the employee; any remaining test
+        # sprints (created_by a test user, on a non-test-named project) too.
+        conn.execute(text(
+            "DELETE FROM attendance_records WHERE employee_id IN "
+            "(SELECT id FROM employees WHERE user_id = ANY(:ids))"
+        ), {"ids": user_ids})
+        conn.execute(text(
+            "DELETE FROM sprints WHERE created_by IN "
+            "(SELECT id FROM employees WHERE user_id = ANY(:ids))"
+        ), {"ids": user_ids})
+        conn.execute(text("DELETE FROM notifications WHERE user_id = ANY(:ids)"), {"ids": user_ids})
         # employees.user_id is ON DELETE RESTRICT — must clear it before the user
         conn.execute(text("DELETE FROM employees WHERE user_id = ANY(:ids)"), {"ids": user_ids})
         conn.execute(text("DELETE FROM users WHERE id = ANY(:ids)"), {"ids": user_ids})

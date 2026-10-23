@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from config.database import get_db
 from config.settings import settings
 from core.security import verify_access_token
+from models.employee import Employee
 from models.user import User
 
 # Bearer token extractor — reads "Authorization: Bearer <token>" header.
@@ -157,3 +158,39 @@ def require_roles(allowed_roles: List[str]):
         return current_user
 
     return _check
+
+
+# ------------------------------------------------------------------ #
+# Current employee dependency
+# ------------------------------------------------------------------ #
+
+def get_current_employee(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Employee:
+    """
+    Resolves the logged-in User's own Employee record. Used by the
+    Attendance / Sprints / Manager Chat modules, which are all scoped to
+    "the caller as an employee" rather than just "the caller as a user."
+
+    Raises HTTP 404 if HR hasn't onboarded this account yet (same
+    message/shape as employee_management.service.get_my_employee_record).
+    """
+    employee = db.query(Employee).filter(Employee.user_id == current_user.id).first()
+    if employee is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No employee record yet. Contact HR to be onboarded.",
+        )
+    return employee
+
+
+def get_current_employee_optional(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Optional[Employee]:
+    """Like get_current_employee, but returns None instead of 404ing when
+    the caller has no Employee record. Used on manager-facing endpoints
+    that admin/hr_manager must be able to reach via their role override
+    even though they're often not themselves onboarded as an Employee."""
+    return db.query(Employee).filter(Employee.user_id == current_user.id).first()

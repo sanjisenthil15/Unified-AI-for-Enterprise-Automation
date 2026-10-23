@@ -50,6 +50,10 @@ from modules.recruitment.router import router as recruitment_router
 from modules.customer_support.router import router as customer_support_router
 from modules.incident_management.router import router as incident_router
 from modules.employee_management.router import router as employee_management_router
+from modules.attendance.router import router as attendance_router
+from modules.sprints.router import router as sprints_router
+from modules.chat.router import router as chat_router
+from modules.notifications.router import router as notifications_router
 
 
 @asynccontextmanager
@@ -110,6 +114,10 @@ app.include_router(recruitment_router,      prefix=API_PREFIX)
 app.include_router(customer_support_router, prefix=API_PREFIX)
 app.include_router(incident_router,          prefix=API_PREFIX)
 app.include_router(employee_management_router, prefix=API_PREFIX)
+app.include_router(attendance_router,       prefix=API_PREFIX)
+app.include_router(sprints_router,          prefix=API_PREFIX)
+app.include_router(chat_router,             prefix=API_PREFIX)
+app.include_router(notifications_router,    prefix=API_PREFIX)
 # Static /meetings/online routes precede offline /meetings/{meeting_id}.
 app.include_router(online_meeting_router,   prefix=API_PREFIX)
 app.include_router(meeting_router,          prefix=API_PREFIX)

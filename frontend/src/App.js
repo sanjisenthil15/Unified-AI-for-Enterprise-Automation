@@ -19,6 +19,10 @@ import Analytics          from './pages/Analytics/Analytics';
 import HRDashboard        from './pages/HRDashboard/HRDashboard';
 import EmployeeManagement from './pages/EmployeeManagement/EmployeeManagement';
 import Profile            from './pages/Profile/Profile';
+import Attendance         from './pages/Attendance/Attendance';
+import Sprints            from './pages/Sprints/Sprints';
+import Chat               from './pages/Chat/Chat';
+import Notifications      from './pages/Notifications/Notifications';
 
 import './App.css';
 
@@ -88,6 +92,15 @@ export default function App() {
             }
           />
           <Route path="/profile" element={<Profile />} />
+
+          {/* Attendance / Sprints / Team Chat / Notifications — open to every
+              employee; manager-only sub-views (team attendance, sprint
+              creation, team review) are gated per-request on the backend
+              and simply don't render their controls client-side otherwise. */}
+          <Route path="/attendance"    element={<Attendance />} />
+          <Route path="/sprints"       element={<Sprints />} />
+          <Route path="/chat"          element={<Chat />} />
+          <Route path="/notifications" element={<Notifications />} />
 
         </Route>
 
