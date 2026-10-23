@@ -26,7 +26,6 @@ Tests cover:
   S. Regression check: Existing /health and auth endpoints still function
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -34,12 +33,10 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-os.environ["DATABASE_URL"] = "sqlite:///:memory:"
-
 import unittest
 from unittest import mock
 from typing import Generator
-from sqlalchemy import create_engine
+from sqlalchemy import BigInteger, SmallInteger, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.ext.compiler import compiles
@@ -55,6 +52,21 @@ def _compile_smallint_sqlite(type_, compiler, **kw):
 
 @compiles(BIGINT, "sqlite")
 def _compile_bigint_sqlite(type_, compiler, **kw):
+    return "INTEGER"
+
+# models/user.py's id column is sqlalchemy.BigInteger (not the MySQL-dialect
+# BIGINT above) — SQLite only grants its auto-incrementing rowid alias to a
+# column whose compiled type is exactly "INTEGER", so on Postgres/MySQL a
+# BigInteger primary key autoincrements fine, but on SQLite it stays NULL
+# unless compiled down to INTEGER like this.
+@compiles(BigInteger, "sqlite")
+def _compile_biginteger_sqlite(type_, compiler, **kw):
+    return "INTEGER"
+
+# Same issue for models/ticket.py's SmallInteger primary keys
+# (SupportTeam.id, SupportCategory.id).
+@compiles(SmallInteger, "sqlite")
+def _compile_smallinteger_sqlite(type_, compiler, **kw):
     return "INTEGER"
 
 # Setup in-memory test database before application imports
@@ -101,12 +113,14 @@ def override_get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-app.dependency_overrides[get_db] = override_get_db
-
-
 class TestCustomerSupportPhase3(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # Scoped to this class's own run — other test files share the same
+        # `app` singleton, so leaving this override in place after this
+        # class finishes would silently redirect every other test's DB
+        # access to this throwaway SQLite engine for the rest of the suite.
+        app.dependency_overrides[get_db] = override_get_db
         Base.metadata.create_all(bind=test_engine)
 
         # Seed roles and admin user
@@ -145,6 +159,10 @@ class TestCustomerSupportPhase3(unittest.TestCase):
         cls.auth_token = create_access_token(data=token_data)
         cls.auth_headers = {"Authorization": f"Bearer {cls.auth_token}"}
         db.close()
+
+    @classmethod
+    def tearDownClass(cls):
+        app.dependency_overrides.pop(get_db, None)
 
     def setUp(self):
         self.db = TestingSessionLocal()
@@ -490,8 +508,8 @@ class TestCustomerSupportPhase3(unittest.TestCase):
         """Verify that passing category_id restricts results to that category."""
         seed_demo_knowledge_data(self.db)
 
-        frontend_cat = self.db.query(SupportCategory).filter(SupportCategory.name == "Frontend & UI").first()
-        backend_cat = self.db.query(SupportCategory).filter(SupportCategory.name == "Backend & APIs").first()
+        frontend_cat = self.db.query(SupportCategory).filter(SupportCategory.name == "UI & Troubleshooting").first()
+        backend_cat = self.db.query(SupportCategory).filter(SupportCategory.name == "Technical Support").first()
 
         # Search "error" restricted to Frontend
         res_fe = service.search_knowledge_base(

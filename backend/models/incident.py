@@ -10,7 +10,6 @@ Tables:
 """
 
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Enum, BigInteger, DECIMAL
-from sqlalchemy.dialects.mysql import BIGINT
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -97,16 +96,16 @@ class IncidentTimeline(Base):
 
     __tablename__ = "incident_timeline"
 
-    id          = Column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    id          = Column(BigInteger, primary_key=True, autoincrement=True)
     incident_id = Column(
-        BIGINT(unsigned=True),
+        BigInteger,
         ForeignKey("incidents.id", onupdate="CASCADE", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     # NULL = AI-generated action (matches schema design)
     actor_id = Column(
-        BIGINT(unsigned=True),
+        BigInteger,
         ForeignKey("users.id", onupdate="CASCADE", ondelete="SET NULL"),
         nullable=True,
     )
@@ -131,9 +130,9 @@ class IncidentAITriage(Base):
 
     __tablename__ = "incident_ai_triage"
 
-    id          = Column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    id          = Column(BigInteger, primary_key=True, autoincrement=True)
     incident_id = Column(
-        BIGINT(unsigned=True),
+        BigInteger,
         ForeignKey("incidents.id", onupdate="CASCADE", ondelete="CASCADE"),
         nullable=False,
         index=True,

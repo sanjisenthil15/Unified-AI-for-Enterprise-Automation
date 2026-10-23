@@ -93,6 +93,8 @@ DocumentType = Literal[
     "troubleshooting",
     "auth_procedure",
     "general_policy",
+    "account_management",
+    "service_operations",
 ]
 
 
