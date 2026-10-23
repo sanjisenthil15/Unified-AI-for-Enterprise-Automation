@@ -32,6 +32,12 @@ class Employee(Base):
         nullable=True,
         index=True,
     )
+    project_id = Column(
+        Integer,
+        ForeignKey("projects.id", onupdate="CASCADE", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     employee_code   = Column(String(30),  nullable=False, unique=True)
     job_title       = Column(String(100), nullable=False)
@@ -64,6 +70,7 @@ class Employee(Base):
     # Relationships
     user       = relationship("User", foreign_keys=[user_id])
     department = relationship("Department", back_populates="employees")
+    project    = relationship("Project", back_populates="members", foreign_keys=[project_id])
 
     def __repr__(self) -> str:
         return f"<Employee id={self.id} code={self.employee_code!r} status={self.status!r}>"

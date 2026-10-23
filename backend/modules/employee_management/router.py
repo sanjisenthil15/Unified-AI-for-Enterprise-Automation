@@ -12,6 +12,9 @@ Endpoints:
     POST   /employee-management/employees/{id}/terminate — mark terminated (admin / hr_manager)
     GET    /employee-management/departments           — list departments (any authenticated user)
     POST   /employee-management/departments           — create a department (admin / hr_manager)
+    GET    /employee-management/projects              — list projects + team leads (any authenticated user)
+    POST   /employee-management/projects              — create a project (admin / hr_manager)
+    POST   /employee-management/projects/{id}/team-lead — assign the team lead (admin / hr_manager)
 """
 
 from typing import List, Optional
@@ -24,12 +27,15 @@ from core.dependencies import get_current_user, require_roles
 from models.user import User
 
 from modules.employee_management.schemas import (
+    AssignTeamLead,
     DepartmentCreate,
     DepartmentResponse,
     EmployeeCreate,
     EmployeeCreatedResponse,
     EmployeeResponse,
     EmployeeUpdate,
+    ProjectCreate,
+    ProjectResponse,
 )
 from modules.employee_management import service
 
@@ -139,3 +145,40 @@ def terminate_employee(
     current_user: User = Depends(require_roles(_MANAGE_ROLES)),
 ):
     return service.terminate_employee(db, employee_id)
+
+
+# ------------------------------------------------------------------ #
+# Projects
+# ------------------------------------------------------------------ #
+
+@router.get("/projects", response_model=List[ProjectResponse], summary="List projects and their team leads")
+def list_projects(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return service.list_projects(db)
+
+
+@router.post(
+    "/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED,
+    summary="Create a project (Admin / HR Manager only)",
+)
+def create_project(
+    payload: ProjectCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(_MANAGE_ROLES)),
+):
+    return service.create_project(db, payload)
+
+
+@router.post(
+    "/projects/{project_id}/team-lead", response_model=ProjectResponse,
+    summary="Assign a project's team lead — must already be a member of the project (Admin / HR Manager only)",
+)
+def assign_team_lead(
+    project_id: int,
+    payload: AssignTeamLead,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(_MANAGE_ROLES)),
+):
+    return service.assign_team_lead(db, project_id, payload.employee_id)

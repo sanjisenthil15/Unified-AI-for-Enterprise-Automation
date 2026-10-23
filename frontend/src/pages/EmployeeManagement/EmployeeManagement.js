@@ -9,8 +9,8 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  createDepartment, createEmployee, listDepartments, listEmployees,
-  terminateEmployee, updateEmployee,
+  assignTeamLead, createDepartment, createEmployee, createProject,
+  listDepartments, listEmployees, listProjects, terminateEmployee, updateEmployee,
 } from '../../api/employeeApi';
 import { listRoles } from '../../api/authApi';
 import '../Recruitment/Recruitment.css';
@@ -20,13 +20,14 @@ const EMPLOYMENT_TYPES = ['full_time', 'part_time', 'contract', 'intern'];
 const STATUS_BADGE = { active: 'green', on_leave: 'amber', inactive: 'purple', terminated: 'red' };
 
 const EMPTY_FORM = {
-  fullName: '', email: '', roleId: '', jobTitle: '', departmentId: '',
+  fullName: '', email: '', roleId: '', jobTitle: '', departmentId: '', projectId: '',
   phone: '', hireDate: '', employmentType: 'full_time',
 };
 
 export default function EmployeeManagement() {
   const [employees, setEmployees] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -35,13 +36,18 @@ export default function EmployeeManagement() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [newDeptName, setNewDeptName] = useState('');
+  const [newProjectName, setNewProjectName] = useState('');
+  const [leadPicks, setLeadPicks] = useState({}); // { [projectId]: employeeId }
   const [justOnboarded, setJustOnboarded] = useState(null); // { employee, temporary_password }
 
   const load = useCallback(async () => {
     try {
-      const [emps, depts, rls] = await Promise.all([listEmployees(), listDepartments(), listRoles()]);
+      const [emps, depts, projs, rls] = await Promise.all([
+        listEmployees(), listDepartments(), listProjects(), listRoles(),
+      ]);
       setEmployees(emps);
       setDepartments(depts);
+      setProjects(projs);
       setRoles(rls);
       setError('');
     } catch {
@@ -69,6 +75,29 @@ export default function EmployeeManagement() {
     }
   }
 
+  async function handleAddProject(e) {
+    e.preventDefault();
+    if (!newProjectName.trim()) return;
+    try {
+      await createProject({ name: newProjectName.trim() });
+      setNewProjectName('');
+      load();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not create project.');
+    }
+  }
+
+  async function handleAssignLead(projectId) {
+    const employeeId = leadPicks[projectId];
+    if (!employeeId) return;
+    try {
+      await assignTeamLead(projectId, Number(employeeId));
+      load();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not assign team lead — they must already be a member of this project.');
+    }
+  }
+
   async function handleOnboard(e) {
     e.preventDefault();
     setSaving(true);
@@ -80,6 +109,7 @@ export default function EmployeeManagement() {
         roleId: Number(form.roleId),
         jobTitle: form.jobTitle.trim(),
         departmentId: form.departmentId ? Number(form.departmentId) : null,
+        projectId: form.projectId ? Number(form.projectId) : null,
         phone: form.phone.trim() || null,
         hireDate: form.hireDate,
         employmentType: form.employmentType,
@@ -153,6 +183,48 @@ export default function EmployeeManagement() {
       </div>
 
       <div className="content-panel">
+        <h2>Projects</h2>
+        {projects.length === 0 && <p style={{ color: 'var(--text-muted)' }}>No projects yet.</p>}
+        {projects.map((p) => (
+          <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.5rem 0', borderBottom: '1px solid var(--border, #e2e8f0)' }}>
+            <div style={{ flex: 1 }}>
+              <strong>{p.name}</strong>
+              <span style={{ color: 'var(--text-muted)', marginLeft: '0.5rem' }}>
+                {p.member_count} member{p.member_count === 1 ? '' : 's'}
+              </span>
+              <div>
+                {p.team_lead
+                  ? <span className="badge green">Lead: {p.team_lead.user.full_name}</span>
+                  : <span className="badge amber">No team lead assigned</span>}
+              </div>
+            </div>
+            <select
+              className="field-select"
+              value={leadPicks[p.id] || ''}
+              onChange={(e) => setLeadPicks((picks) => ({ ...picks, [p.id]: e.target.value }))}
+            >
+              <option value="">Set team lead…</option>
+              {employees.filter((emp) => emp.project?.id === p.id).map((emp) => (
+                <option key={emp.id} value={emp.id}>{emp.user.full_name}</option>
+              ))}
+            </select>
+            <button className="btn-secondary" onClick={() => handleAssignLead(p.id)} disabled={!leadPicks[p.id]}>
+              Assign
+            </button>
+          </div>
+        ))}
+        <form onSubmit={handleAddProject} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+          <input
+            className="field-input"
+            placeholder="New project name"
+            value={newProjectName}
+            onChange={(e) => setNewProjectName(e.target.value)}
+          />
+          <button type="submit" className="btn-secondary">+ Add project</button>
+        </form>
+      </div>
+
+      <div className="content-panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
           <h2 style={{ margin: 0 }}>Employee directory</h2>
           <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
@@ -193,6 +265,13 @@ export default function EmployeeManagement() {
                   </select>
                 </div>
                 <div className="field-group">
+                  <label>Project</label>
+                  <select className="field-select" name="projectId" value={form.projectId} onChange={field}>
+                    <option value="">None</option>
+                    {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div className="field-group">
                   <label>Employment type</label>
                   <select className="field-select" name="employmentType" value={form.employmentType} onChange={field}>
                     {EMPLOYMENT_TYPES.map((t) => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
@@ -228,6 +307,7 @@ export default function EmployeeManagement() {
                 <th style={{ padding: '0.5rem' }}>Name</th>
                 <th style={{ padding: '0.5rem' }}>Job title</th>
                 <th style={{ padding: '0.5rem' }}>Department</th>
+                <th style={{ padding: '0.5rem' }}>Project</th>
                 <th style={{ padding: '0.5rem' }}>Hire date</th>
                 <th style={{ padding: '0.5rem' }}>Status</th>
                 <th style={{ padding: '0.5rem' }}>Actions</th>
@@ -239,6 +319,7 @@ export default function EmployeeManagement() {
                   <td style={{ padding: '0.5rem' }}>{emp.user.full_name}<br /><small style={{ color: 'var(--text-muted)' }}>{emp.user.email}</small></td>
                   <td style={{ padding: '0.5rem' }}>{emp.job_title}</td>
                   <td style={{ padding: '0.5rem' }}>{emp.department?.name || '—'}</td>
+                  <td style={{ padding: '0.5rem' }}>{emp.project?.name || '—'}</td>
                   <td style={{ padding: '0.5rem' }}>{emp.hire_date}</td>
                   <td style={{ padding: '0.5rem' }}>
                     <span className={`badge ${STATUS_BADGE[emp.status] || 'purple'}`}>{emp.status.replace('_', ' ')}</span>

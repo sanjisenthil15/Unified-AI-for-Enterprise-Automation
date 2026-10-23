@@ -30,6 +30,9 @@ TEST_EMAIL_LIKE = "pytest\\_%@example.com"
 def _cleanup_test_rows() -> None:
     """Remove any rows created by tests (identified by the pytest_*@example.com email)."""
     with engine.begin() as conn:
+        # Test project names embed the test's unique_email, e.g. "Project pytest_xyz@example.com"
+        conn.execute(text("DELETE FROM projects WHERE name LIKE 'Project pytest\\_%' ESCAPE '\\'"))
+
         user_ids = [
             r[0] for r in conn.execute(
                 text("SELECT id FROM users WHERE email LIKE :p ESCAPE '\\'"),

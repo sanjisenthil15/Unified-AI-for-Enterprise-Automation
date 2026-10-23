@@ -43,6 +43,7 @@ export default function Profile() {
             <dt style={{ fontWeight: 600 }}>Name</dt><dd>{employee.user.full_name}</dd>
             <dt style={{ fontWeight: 600 }}>Email</dt><dd>{employee.user.email}</dd>
             <dt style={{ fontWeight: 600 }}>Job title</dt><dd>{employee.job_title}</dd>
+            <dt style={{ fontWeight: 600 }}>Project</dt><dd>{employee.project?.name || '—'}</dd>
             <dt style={{ fontWeight: 600 }}>Department</dt><dd>{employee.department?.name || '—'}</dd>
             <dt style={{ fontWeight: 600 }}>Employment type</dt><dd>{employee.employment_type.replace('_', ' ')}</dd>
             <dt style={{ fontWeight: 600 }}>Hire date</dt><dd>{employee.hire_date}</dd>

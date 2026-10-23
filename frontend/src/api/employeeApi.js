@@ -43,7 +43,7 @@ export async function getEmployee(id) {
  * only ever shown this once.
  */
 export async function createEmployee({
-  fullName, email, roleId, jobTitle, departmentId, phone, hireDate, employmentType,
+  fullName, email, roleId, jobTitle, departmentId, projectId, phone, hireDate, employmentType,
 }) {
   const res = await axiosInstance.post(`${BASE}/employees`, {
     full_name: fullName,
@@ -51,6 +51,7 @@ export async function createEmployee({
     role_id: roleId,
     job_title: jobTitle,
     department_id: departmentId || null,
+    project_id: projectId || null,
     phone: phone || null,
     hire_date: hireDate,
     employment_type: employmentType || 'full_time',
@@ -58,10 +59,11 @@ export async function createEmployee({
   return res.data;
 }
 
-export async function updateEmployee(id, { jobTitle, departmentId, phone, employmentType, status }) {
+export async function updateEmployee(id, { jobTitle, departmentId, projectId, phone, employmentType, status }) {
   const payload = {};
   if (jobTitle !== undefined) payload.job_title = jobTitle;
   if (departmentId !== undefined) payload.department_id = departmentId;
+  if (projectId !== undefined) payload.project_id = projectId;
   if (phone !== undefined) payload.phone = phone;
   if (employmentType !== undefined) payload.employment_type = employmentType;
   if (status !== undefined) payload.status = status;
@@ -71,5 +73,20 @@ export async function updateEmployee(id, { jobTitle, departmentId, phone, employ
 
 export async function terminateEmployee(id) {
   const res = await axiosInstance.post(`${BASE}/employees/${id}/terminate`);
+  return res.data;
+}
+
+export async function listProjects() {
+  const res = await axiosInstance.get(`${BASE}/projects`);
+  return res.data;
+}
+
+export async function createProject({ name, description }) {
+  const res = await axiosInstance.post(`${BASE}/projects`, { name, description });
+  return res.data;
+}
+
+export async function assignTeamLead(projectId, employeeId) {
+  const res = await axiosInstance.post(`${BASE}/projects/${projectId}/team-lead`, { employee_id: employeeId });
   return res.data;
 }

@@ -102,3 +102,52 @@ def test_department_create_assign_and_update(client, new_user, unique_email):
     # Terminated employees still show up in the directory (compliance/history).
     listing = client.get(f"{BASE}/employees", headers=admin["headers"])
     assert any(e["id"] == employee_id for e in listing.json())
+
+
+def test_project_create_staff_and_assign_team_lead(client, new_user, unique_email):
+    admin = new_user("Admin User")
+    role_id = _role_id(client, admin["headers"], "employee")
+
+    project_name = f"Project {unique_email}"
+    r = client.post(f"{BASE}/projects", headers=admin["headers"], json={"name": project_name})
+    assert r.status_code == 201, r.text
+    project_id = r.json()["id"]
+    assert r.json()["member_count"] == 0
+    assert r.json()["team_lead"] is None
+
+    r = client.post(f"{BASE}/employees", headers=admin["headers"], json={
+        "full_name": "Future Lead",
+        "email": unique_email,
+        "role_id": role_id,
+        "job_title": "Software Engineer",
+        "project_id": project_id,
+        "hire_date": "2026-04-01",
+    })
+    assert r.status_code == 201, r.text
+    employee_id = r.json()["employee"]["id"]
+    assert r.json()["employee"]["project"]["name"] == project_name
+
+    # Someone not on the project cannot be made its team lead.
+    other_email = f"other_{unique_email}"
+    r2 = client.post(f"{BASE}/employees", headers=admin["headers"], json={
+        "full_name": "Not On Project",
+        "email": other_email,
+        "role_id": role_id,
+        "job_title": "Software Engineer",
+        "hire_date": "2026-04-01",
+    })
+    outsider_id = r2.json()["employee"]["id"]
+    r = client.post(f"{BASE}/projects/{project_id}/team-lead", headers=admin["headers"],
+                     json={"employee_id": outsider_id})
+    assert r.status_code == 400
+
+    # The actual project member can be assigned.
+    r = client.post(f"{BASE}/projects/{project_id}/team-lead", headers=admin["headers"],
+                     json={"employee_id": employee_id})
+    assert r.status_code == 200, r.text
+    assert r.json()["team_lead"]["id"] == employee_id
+    assert r.json()["team_lead"]["user"]["full_name"] == "Future Lead"
+    assert r.json()["member_count"] == 1
+
+    listing = client.get(f"{BASE}/projects", headers=admin["headers"])
+    assert any(p["id"] == project_id and p["team_lead"]["id"] == employee_id for p in listing.json())

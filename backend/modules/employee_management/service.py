@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, joinedload
 from core.security import hash_password
 from models.department import Department
 from models.employee import Employee
+from models.project import Project
 from models.role import Role
 from models.user import User
 
@@ -49,6 +50,7 @@ def _employee_query(db: Session):
     return db.query(Employee).options(
         joinedload(Employee.user).joinedload(User.role),
         joinedload(Employee.department),
+        joinedload(Employee.project),
     )
 
 
@@ -90,6 +92,11 @@ def create_employee(db: Session, payload):
         if dept is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Department id={payload.department_id} does not exist.")
 
+    if payload.project_id is not None:
+        project = db.query(Project).filter(Project.id == payload.project_id).first()
+        if project is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Project id={payload.project_id} does not exist.")
+
     existing_user = (
         db.query(User)
         .filter(User.email == payload.email.lower(), User.deleted_at.is_(None))
@@ -113,6 +120,7 @@ def create_employee(db: Session, payload):
     employee = Employee(
         user_id=user.id,
         department_id=payload.department_id,
+        project_id=payload.project_id,
         employee_code=f"EMP-{uuid.uuid4().hex[:8].upper()}",
         job_title=payload.job_title,
         phone=payload.phone,
@@ -136,6 +144,10 @@ def update_employee(db: Session, employee_id: int, payload) -> Employee:
         dept = db.query(Department).filter(Department.id == data["department_id"]).first()
         if dept is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Department id={data['department_id']} does not exist.")
+    if "project_id" in data and data["project_id"] is not None:
+        project = db.query(Project).filter(Project.id == data["project_id"]).first()
+        if project is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Project id={data['project_id']} does not exist.")
     for field, value in data.items():
         setattr(employee, field, value)
 
@@ -152,3 +164,63 @@ def terminate_employee(db: Session, employee_id: int) -> Employee:
     db.commit()
     db.refresh(employee)
     return get_employee(db, employee.id)
+
+
+# ------------------------------------------------------------------ #
+# Projects
+# ------------------------------------------------------------------ #
+
+def _project_query(db: Session):
+    return db.query(Project).options(
+        joinedload(Project.team_lead).joinedload(Employee.user),
+    )
+
+
+def _with_member_count(db: Session, project: Project) -> Project:
+    project.member_count = (
+        db.query(Employee)
+        .filter(Employee.project_id == project.id, Employee.deleted_at.is_(None))
+        .count()
+    )
+    return project
+
+
+def list_projects(db: Session) -> list[Project]:
+    projects = _project_query(db).order_by(Project.name).all()
+    return [_with_member_count(db, p) for p in projects]
+
+
+def get_project(db: Session, project_id: int) -> Project:
+    project = _project_query(db).filter(Project.id == project_id).first()
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Project id={project_id} not found.")
+    return _with_member_count(db, project)
+
+
+def create_project(db: Session, payload) -> Project:
+    existing = db.query(Project).filter(Project.name == payload.name).first()
+    if existing is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "A project with this name already exists.")
+    project = Project(name=payload.name, description=payload.description)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return get_project(db, project.id)
+
+
+def assign_team_lead(db: Session, project_id: int, employee_id: int) -> Project:
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Project id={project_id} not found.")
+    employee = db.query(Employee).filter(Employee.id == employee_id).first()
+    if employee is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Employee id={employee_id} does not exist.")
+    if employee.project_id != project_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "The team lead must already be a member of this project — assign them to it first.",
+        )
+    project.team_lead_id = employee_id
+    db.commit()
+    db.refresh(project)
+    return get_project(db, project.id)
