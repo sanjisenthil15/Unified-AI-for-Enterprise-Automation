@@ -7,7 +7,6 @@
  */
 
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
 import './Dashboard.css';
 
 /**
@@ -80,37 +79,8 @@ const MODULES = [
 ];
 
 export default function Dashboard() {
-  const navigate = useNavigate();
-
   return (
     <div className="dashboard-page">
-
-      {/* ── Top navigation bar ──────────────────────────────────── */}
-      <nav className="dashboard-navbar" aria-label="Main navigation">
-        <div className="navbar-brand">
-          <span className="navbar-logo" aria-hidden="true">⚡</span>
-          <span className="navbar-title">
-            Unified <span>AI</span> Enterprise
-          </span>
-        </div>
-
-        <div className="navbar-right">
-          <span className="navbar-badge">Admin</span>
-
-          {/* Avatar — clicking returns to login (sign-out simulation) */}
-          <div
-            className="navbar-avatar"
-            role="button"
-            tabIndex={0}
-            aria-label="Sign out"
-            title="Sign out"
-            onClick={() => navigate('/login')}
-            onKeyDown={(e) => e.key === 'Enter' && navigate('/login')}
-          >
-            A
-          </div>
-        </div>
-      </nav>
 
       {/* ── Main content ────────────────────────────────────────── */}
       <main className="dashboard-main">

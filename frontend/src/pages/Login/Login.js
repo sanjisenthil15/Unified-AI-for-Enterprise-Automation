@@ -61,7 +61,7 @@ export default function Login() {
 
       // Step 4 — Navigate based on role
       const role = user?.role?.name?.toLowerCase();
-      if (role === 'hr') {
+      if (role === 'hr_manager') {
         navigate('/hr');
       } else {
         navigate('/dashboard');
