@@ -5,15 +5,16 @@ Imports all ORM models so that SQLAlchemy's metadata is fully populated
 before Alembic autogenerate / Base.metadata.create_all() runs.
 
 Import order matters for FK resolution:
-  Role → User → JobPosting → Resume → SupportTeam → SupportCategory →
-  KnowledgeDocument → KnowledgeChunk → ChatSession → SupportTicket →
-  ChatMessage → TicketMessage
+  Role → User → JobPosting → Resume → Department → Employee →
+  SupportTeam → SupportCategory → KnowledgeDocument → KnowledgeChunk →
+  ChatSession → SupportTicket → ChatMessage → TicketMessage
 """
 
 from models.role        import Role         # noqa: F401
 from models.user        import User         # noqa: F401
 from models.job_posting import JobPosting   # noqa: F401
 from models.resume      import Resume       # noqa: F401
+from models.department  import Department   # noqa: F401
 from models.employee    import Employee     # noqa: F401
 from models.candidate   import Candidate    # noqa: F401
 from models.incident    import Incident, IncidentTimeline, IncidentAITriage  # noqa: F401

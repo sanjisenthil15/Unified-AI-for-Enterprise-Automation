@@ -52,7 +52,7 @@ router = APIRouter(prefix="/recruitment", tags=["Recruitment"])
 def create_job(
     payload:      JobPostingCreate,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_roles(["hr", "admin"])),
+    current_user: User    = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
 ):
     return service.create_job_posting(db, payload, created_by_id=current_user.id)
 
@@ -83,7 +83,7 @@ def update_job(
     job_id:       int,
     payload:      JobPostingUpdate,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_roles(["hr", "admin"])),
+    current_user: User    = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
 ):
     return service.update_job_posting(db, job_id, payload)
 
@@ -93,7 +93,7 @@ def update_job(
 def delete_job(
     job_id:       int,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_roles(["hr", "admin"])),
+    current_user: User    = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
 ):
     service.delete_job_posting(db, job_id)
 
@@ -111,7 +111,7 @@ async def upload_resume(
     candidate_email: Optional[str]  = Form(None),
     resume_file:     UploadFile     = File(...),
     db:              Session        = Depends(get_db),
-    current_user:    User           = Depends(require_roles(["hr", "admin"])),
+    current_user:    User           = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
 ):
     service.get_job_posting(db, job_id)
     return service.save_and_extract_resume(
@@ -128,7 +128,7 @@ async def bulk_upload_resumes(
     job_id:       int,
     files:        List[UploadFile] = File(...),
     db:           Session          = Depends(get_db),
-    current_user: User             = Depends(require_roles(["hr", "admin"])),
+    current_user: User             = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
 ):
     results = service.bulk_upload_resumes(db, job_id, files)
     succeeded  = sum(1 for r in results if r["status"] == "ok")
@@ -171,7 +171,7 @@ def update_resume(
     resume_id:    int,
     payload:      ResumeUpdate,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_roles(["hr", "admin"])),
+    current_user: User    = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
 ):
     return service.update_resume_info(db, resume_id, payload)
 
@@ -181,7 +181,7 @@ def update_resume(
 def delete_resume(
     resume_id:    int,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_roles(["hr", "admin"])),
+    current_user: User    = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
 ):
     service.delete_resume(db, resume_id)
 
@@ -212,7 +212,7 @@ def recruitment_stats(
 def analyze_resumes(
     job_id:       int,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_roles(["hr", "admin"])),
+    current_user: User    = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
 ):
     results = service.analyze_job_resumes(db, job_id)
     analysed_count = sum(1 for r in results if r.status == "analysed")

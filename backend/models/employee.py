@@ -26,8 +26,12 @@ class Employee(Base):
         unique=True,
         index=True,
     )
-    # department_id is nullable until the departments table is active
-    department_id = Column(Integer, nullable=True, index=True)
+    department_id = Column(
+        Integer,
+        ForeignKey("departments.id", onupdate="CASCADE", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     employee_code   = Column(String(30),  nullable=False, unique=True)
     job_title       = Column(String(100), nullable=False)
@@ -58,7 +62,8 @@ class Employee(Base):
     deleted_at = Column(DateTime(timezone=True), nullable=True, default=None)
 
     # Relationships
-    user = relationship("User", foreign_keys=[user_id])
+    user       = relationship("User", foreign_keys=[user_id])
+    department = relationship("Department", back_populates="employees")
 
     def __repr__(self) -> str:
         return f"<Employee id={self.id} code={self.employee_code!r} status={self.status!r}>"

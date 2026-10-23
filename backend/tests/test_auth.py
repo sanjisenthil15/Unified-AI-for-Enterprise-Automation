@@ -7,7 +7,21 @@ def test_health(client):
     assert r.json()["status"] == "ok"
 
 
-def test_register_returns_seeded_role(client, unique_email):
+def test_register_always_assigns_employee_role(client, unique_email):
+    r = client.post("/api/v1/auth/register", json={
+        "full_name": "Pytest User",
+        "email": unique_email,
+        "password": "Str0ngPass1",
+    })
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["email"] == unique_email
+    assert body["role"]["name"] == "employee"
+
+
+def test_register_ignores_a_client_supplied_role_id(client, unique_email):
+    # Self-serve registration must never let a caller grant themselves a
+    # privileged role — role_id=1 ("admin") here must be silently ignored.
     r = client.post("/api/v1/auth/register", json={
         "full_name": "Pytest User",
         "email": unique_email,
@@ -15,9 +29,7 @@ def test_register_returns_seeded_role(client, unique_email):
         "role_id": 1,
     })
     assert r.status_code == 201, r.text
-    body = r.json()
-    assert body["email"] == unique_email
-    assert body["role"]["name"] == "admin"
+    assert r.json()["role"]["name"] == "employee"
 
 
 def test_register_rejects_weak_password(client, unique_email):
@@ -25,7 +37,6 @@ def test_register_rejects_weak_password(client, unique_email):
         "full_name": "Pytest User",
         "email": unique_email,
         "password": "alllowercase",  # no uppercase, no digit
-        "role_id": 1,
     })
     assert r.status_code == 422
 
@@ -33,7 +44,7 @@ def test_register_rejects_weak_password(client, unique_email):
 def test_login_and_me(client, unique_email):
     pw = "Str0ngPass1"
     client.post("/api/v1/auth/register", json={
-        "full_name": "Pytest User", "email": unique_email, "password": pw, "role_id": 1,
+        "full_name": "Pytest User", "email": unique_email, "password": pw,
     })
     r = client.post("/api/v1/auth/login", json={"email": unique_email, "password": pw})
     assert r.status_code == 200
@@ -46,7 +57,7 @@ def test_login_and_me(client, unique_email):
 
 def test_login_rejects_bad_password(client, unique_email):
     client.post("/api/v1/auth/register", json={
-        "full_name": "Pytest User", "email": unique_email, "password": "Str0ngPass1", "role_id": 1,
+        "full_name": "Pytest User", "email": unique_email, "password": "Str0ngPass1",
     })
     r = client.post("/api/v1/auth/login", json={"email": unique_email, "password": "Wr0ngPass1"})
     assert r.status_code == 401
@@ -67,7 +78,7 @@ def test_roles_is_public(client):
 def test_users_lists_active_accounts(client, unique_email):
     pw = "Str0ngPass1"
     client.post("/api/v1/auth/register", json={
-        "full_name": "Pytest User", "email": unique_email, "password": pw, "role_id": 1,
+        "full_name": "Pytest User", "email": unique_email, "password": pw,
     })
     r = client.post("/api/v1/auth/login", json={"email": unique_email, "password": pw})
     token = r.json()["access_token"]

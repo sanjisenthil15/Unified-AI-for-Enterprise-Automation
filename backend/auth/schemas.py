@@ -46,12 +46,6 @@ class UserRegister(BaseModel):
         examples=["Str0ng!Pass"],
         description="Plain-text password (min 8 characters). Stored as bcrypt hash.",
     )
-    role_id: int = Field(
-        ...,
-        ge=1,
-        examples=[5],
-        description="ID of the role to assign. Must exist in the roles table.",
-    )
 
     @field_validator("password")
     @classmethod

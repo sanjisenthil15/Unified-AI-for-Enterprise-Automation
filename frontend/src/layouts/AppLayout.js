@@ -3,8 +3,10 @@
  *
  * Shared layout shell — sidebar + topbar + <Outlet>.
  *
- * Role-based sidebar: HR users only see the Recruitment link.
- * All other roles see the full navigation.
+ * Role-based sidebar: each item's `roles` (null = everyone) decides
+ * whether it's shown for the current user's role. This only hides the
+ * link — real enforcement for role-sensitive pages lives in App.js's
+ * ProtectedRoute(allowedRoles=...).
  * No CSS changes — reuses AppLayout.css exactly as-is.
  */
 
@@ -12,18 +14,15 @@ import React, { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import './AppLayout.css';
 
-const ALL_NAV = [
-  { to: '/dashboard',        icon: '🏠', label: 'Dashboard' },
-  { to: '/hr',               icon: '🧑‍💼', label: 'HR Recruitment' },
-  { to: '/customer-support', icon: '🎧', label: 'Customer Support' },
-  { to: '/incidents',        icon: '🚨', label: 'Incident Management' },
-  { to: '/meetings',         icon: '🎙️', label: 'Meetings' },
-  { to: '/analytics',        icon: '📊', label: 'Analytics' },
-];
-
-const HR_NAV = [
-  { to: '/hr',          icon: '🏠', label: 'HR Dashboard' },
-  { to: '/recruitment', icon: '🤖', label: 'Recruitment' },
+const NAV_ITEMS = [
+  { to: '/dashboard',        icon: '🏠', label: 'Dashboard',            roles: null },
+  { to: '/hr',                icon: '🧑‍💼', label: 'HR Recruitment',     roles: null },
+  { to: '/customer-support',  icon: '🎧', label: 'Customer Support',    roles: null },
+  { to: '/incidents',         icon: '🚨', label: 'Incident Management', roles: null },
+  { to: '/meetings',          icon: '🎙️', label: 'Meetings',            roles: null },
+  { to: '/employees',         icon: '👥', label: 'Employee Management', roles: ['admin', 'hr_manager'] },
+  { to: '/analytics',         icon: '📊', label: 'Analytics',           roles: null },
+  { to: '/profile',           icon: '👤', label: 'My Profile',          roles: null },
 ];
 
 export default function AppLayout() {
@@ -34,13 +33,15 @@ export default function AppLayout() {
     catch { return null; }
   });
 
-  const role         = user?.role?.name?.toLowerCase() ?? '';
-  const displayName  = user?.full_name  ?? 'User';
-  const displayRole  = user?.role?.name ?? '';
+  // AUTH_DISABLED means the backend treats every request as the seeded
+  // admin — match that here so dev mode doesn't hide admin-only links.
+  const authDisabled = process.env.REACT_APP_AUTH_DISABLED === 'true';
+  const role         = authDisabled ? 'admin' : (user?.role?.name?.toLowerCase() ?? '');
+  const displayName  = user?.full_name  ?? (authDisabled ? 'Demo Admin' : 'User');
+  const displayRole  = user?.role?.name ?? (authDisabled ? 'admin' : '');
   const avatarLetter = displayName.charAt(0).toUpperCase();
 
-  // HR only sees HR_NAV; everyone else sees ALL_NAV
-  const navItems = role === 'hr' ? HR_NAV : ALL_NAV;
+  const navItems = NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(role));
 
   function handleLogout() {
     localStorage.removeItem('access_token');

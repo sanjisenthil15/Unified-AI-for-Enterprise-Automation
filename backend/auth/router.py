@@ -51,9 +51,10 @@ def list_roles(db: Session = Depends(get_db)) -> list[Role]:
     status_code=status.HTTP_201_CREATED,
     summary="Register a new user account",
     description=(
-        "Creates a new user account. The password is hashed with bcrypt "
-        "before storage — the plain-text password is never persisted. "
-        "The supplied role_id must reference an existing role."
+        "Creates a new user account with the default 'employee' role. "
+        "The password is hashed with bcrypt before storage — the "
+        "plain-text password is never persisted. Higher-privilege roles "
+        "are assigned by HR/admin via Employee Management, not self-serve."
     ),
 )
 def register(
@@ -62,19 +63,21 @@ def register(
 ) -> UserResponse:
     """
     Registration flow:
-      1. Verify the requested role exists.
+      1. Resolve the default 'employee' role (self-serve accounts never
+         choose their own role — that would let anyone grant themselves
+         admin).
       2. Check that no account already uses the supplied email.
       3. Hash the password.
       4. Persist the new User row.
       5. Return the created user (without password).
     """
 
-    # Step 1 — Validate role exists
-    role: Role | None = db.query(Role).filter(Role.id == payload.role_id).first()
+    # Step 1 — Always the default role; never trust a client-supplied role_id here
+    role: Role | None = db.query(Role).filter(Role.name == "employee").first()
     if role is None:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Role with id={payload.role_id} does not exist.",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Default 'employee' role is missing. Run `alembic upgrade head`.",
         )
 
     # Step 2 — Check email uniqueness
@@ -97,7 +100,7 @@ def register(
         full_name=payload.full_name,
         email=payload.email.lower(),   # normalise to lowercase for consistency
         hashed_password=hashed,
-        role_id=payload.role_id,
+        role_id=role.id,
         is_active=True,
     )
     db.add(new_user)

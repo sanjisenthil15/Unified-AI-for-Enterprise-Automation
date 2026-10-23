@@ -46,8 +46,8 @@ from modules.incident_management.schemas import (
 
 router = APIRouter(prefix="/incidents", tags=["Incident Management"])
 
-_WRITE_ROLES  = ["it_engineer", "admin", "manager"]
-_ASSIGN_ROLES = ["admin", "manager"]
+_WRITE_ROLES  = ["admin", "support_agent"]
+_ASSIGN_ROLES = ["admin", "support_agent"]
 
 
 # ------------------------------------------------------------------ #

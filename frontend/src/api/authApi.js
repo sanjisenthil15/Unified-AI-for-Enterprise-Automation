@@ -73,12 +73,11 @@ export async function listUsers() {
  * @param {{ fullName: string, email: string, password: string, roleId: number }} payload
  * @returns {Promise<{ id: number, full_name: string, email: string, role: object }>}
  */
-export async function registerUser({ fullName, email, password, roleId }) {
+export async function registerUser({ fullName, email, password }) {
   const response = await axiosInstance.post('/api/v1/auth/register', {
     full_name: fullName,
     email,
     password,
-    role_id: roleId,
   });
   return response.data;
 }

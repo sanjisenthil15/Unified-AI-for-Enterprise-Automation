@@ -17,6 +17,8 @@ import Meetings           from './pages/Meetings/Meetings';
 import OnlineMeeting      from './pages/Meetings/OnlineMeeting';
 import Analytics          from './pages/Analytics/Analytics';
 import HRDashboard        from './pages/HRDashboard/HRDashboard';
+import EmployeeManagement from './pages/EmployeeManagement/EmployeeManagement';
+import Profile            from './pages/Profile/Profile';
 
 import './App.css';
 
@@ -24,11 +26,29 @@ import './App.css';
 // runs without logging in. See backend/.env AUTH_DISABLED.
 const AUTH_DISABLED = process.env.REACT_APP_AUTH_DISABLED === 'true';
 
-/** Redirect to /login if not authenticated (unless auth is disabled for dev). */
-function ProtectedRoute({ children }) {
-  return AUTH_DISABLED || localStorage.getItem('access_token')
-    ? children
-    : <Navigate to="/login" replace />;
+/** The cached role from the last login — AUTH_DISABLED always acts as the
+ * seeded admin backend-side, so it's treated the same way here. */
+function currentRole() {
+  if (AUTH_DISABLED) return 'admin';
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || 'null');
+    return user?.role?.name?.toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Redirect to /login if not authenticated (unless auth is disabled for
+ * dev); if allowedRoles is given, redirect non-matching roles to /dashboard
+ * — real enforcement, not just hiding the sidebar link. */
+function ProtectedRoute({ children, allowedRoles }) {
+  if (!AUTH_DISABLED && !localStorage.getItem('access_token')) {
+    return <Navigate to="/login" replace />;
+  }
+  if (allowedRoles && !allowedRoles.includes(currentRole())) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  return children;
 }
 
 export default function App() {
@@ -57,6 +77,17 @@ export default function App() {
           {/* HR recruitment — the real module. /recruitment kept as an alias. */}
           <Route path="/hr"          element={<HRDashboard />} />
           <Route path="/recruitment" element={<HRDashboard />} />
+
+          {/* Employee Management — admin/hr_manager only; My Profile is open to everyone. */}
+          <Route
+            path="/employees"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'hr_manager']}>
+                <EmployeeManagement />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/profile" element={<Profile />} />
 
         </Route>
 

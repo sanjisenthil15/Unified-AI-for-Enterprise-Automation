@@ -45,6 +45,8 @@ def _cleanup_test_rows() -> None:
         conn.execute(text("DELETE FROM job_postings WHERE created_by = ANY(:ids)"), {"ids": user_ids})
         # meeting children cascade from meetings (ON DELETE CASCADE)
         conn.execute(text("DELETE FROM meetings WHERE created_by = ANY(:ids)"), {"ids": user_ids})
+        # employees.user_id is ON DELETE RESTRICT — must clear it before the user
+        conn.execute(text("DELETE FROM employees WHERE user_id = ANY(:ids)"), {"ids": user_ids})
         conn.execute(text("DELETE FROM users WHERE id = ANY(:ids)"), {"ids": user_ids})
 
 
@@ -75,16 +77,36 @@ def client():
         yield c
 
 
+def _promote_to_role(email: str, role_name: str) -> None:
+    """Test-only helper: /auth/register always assigns 'employee' (anyone
+    self-granting a privileged role would be a real security hole), so
+    fixtures that need a privileged test user promote them directly via
+    the DB afterward — same pattern as the meeting_owner fixture below."""
+    from models.role import Role
+    from models.user import User
+
+    session = SessionLocal()
+    try:
+        role = session.query(Role).filter(Role.name == role_name).first()
+        user = session.query(User).filter(User.email == email).first()
+        user.role_id = role.id
+        session.commit()
+    finally:
+        session.close()
+
+
 @pytest.fixture
 def new_user(client):
-    """Factory: register + log in a fresh user, return {id, email, headers}."""
-    def _make(full_name: str = "Pytest User") -> dict:
+    """Factory: register + log in a fresh user (promoted to admin, matching
+    this fixture's historical behavior), return {id, email, headers}."""
+    def _make(full_name: str = "Pytest User", role: str = "admin") -> dict:
         email = f"pytest_{uuid.uuid4().hex[:10]}@example.com"
         password = "Str0ngPass1"
         r = client.post("/api/v1/auth/register", json={
-            "full_name": full_name, "email": email, "password": password, "role_id": 1,
+            "full_name": full_name, "email": email, "password": password,
         })
         assert r.status_code == 201, r.text
+        _promote_to_role(email, role)
         r = client.post("/api/v1/auth/login", json={"email": email, "password": password})
         assert r.status_code == 200, r.text
         headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
@@ -142,9 +164,9 @@ def admin_headers(client, unique_email) -> dict:
         "full_name": "Pytest Admin",
         "email": unique_email,
         "password": password,
-        "role_id": 1,  # admin (seeded by the initial migration)
     })
     assert r.status_code == 201, r.text
+    _promote_to_role(unique_email, "admin")
     r = client.post("/api/v1/auth/login", json={"email": unique_email, "password": password})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}

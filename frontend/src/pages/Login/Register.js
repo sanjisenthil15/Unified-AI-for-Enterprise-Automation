@@ -2,17 +2,21 @@
  * pages/Login/Register.js
  *
  * Self-serve account creation — connected to the FastAPI backend.
+ * Always creates a standard "employee" account; HR/admin assigns any
+ * higher-privilege role afterward via Employee Management, never at
+ * public signup (the backend enforces this too — it ignores any role
+ * a client might send here).
  *
  * On submit:
- *   1. POST /api/v1/auth/register with full name + email + password + role.
+ *   1. POST /api/v1/auth/register with full name + email + password.
  *   2. On success, redirect to /login with a confirmation message.
  *
  * Styled to match Login.js (same login-page / login-form classes).
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { registerUser, listRoles } from '../../api/authApi';
+import { registerUser } from '../../api/authApi';
 import './Login.css';
 
 const MODULES = [
@@ -30,36 +34,21 @@ export default function Register() {
   const [fullName, setFullName] = useState('');
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
-  const [roleId,   setRoleId]   = useState('');
-  const [roles,    setRoles]    = useState([]);
   const [error,    setError]    = useState('');
   const [loading,  setLoading]  = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    listRoles()
-      .then((list) => {
-        if (cancelled) return;
-        setRoles(list);
-        const employee = list.find((r) => r.name === 'employee');
-        setRoleId(String((employee || list[0])?.id || ''));
-      })
-      .catch(() => { if (!cancelled) setError('Could not load roles. Check backend availability.'); });
-    return () => { cancelled = true; };
-  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
 
-    if (!fullName.trim() || !email.trim() || !password.trim() || !roleId) {
+    if (!fullName.trim() || !email.trim() || !password.trim()) {
       setError('Please fill in every field.');
       return;
     }
 
     setLoading(true);
     try {
-      await registerUser({ fullName: fullName.trim(), email: email.trim(), password, roleId: Number(roleId) });
+      await registerUser({ fullName: fullName.trim(), email: email.trim(), password });
       navigate('/login', { state: { registered: true } });
     } catch (err) {
       const detail = err.response?.data?.detail;
@@ -159,24 +148,6 @@ export default function Register() {
             </div>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="role">Role</label>
-            <div className="input-wrapper">
-              <span className="input-icon" aria-hidden="true">🏷️</span>
-              <select
-                id="role"
-                className="form-input"
-                value={roleId}
-                onChange={(e) => setRoleId(e.target.value)}
-                disabled={loading || !roles.length}
-              >
-                {roles.map((role) => (
-                  <option key={role.id} value={role.id}>{role.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
           {error && (
             <div className="login-error" role="alert">
               {error}
@@ -188,6 +159,9 @@ export default function Register() {
           </button>
         </form>
 
+        <p className="login-footer">
+          Need a role beyond basic access? Ask your admin or HR to add you via Employee Management.
+        </p>
         <p className="login-footer">
           Already have an account? <Link to="/login">Sign in</Link>
         </p>
