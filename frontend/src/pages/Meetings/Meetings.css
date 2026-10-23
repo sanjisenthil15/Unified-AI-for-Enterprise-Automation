@@ -210,6 +210,20 @@
 }
 .mi-action-meta .mi-btn { margin-left: auto; }
 
+.mi-action-convert {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px dashed var(--border);
+}
+.mi-action-convert select,
+.mi-action-convert input {
+  font-size: 0.8rem;
+  padding: 0.3rem 0.5rem;
+}
+
 @media (max-width: 760px) {
   .mi-upload-grid,
   .mi-analysis-cols { grid-template-columns: 1fr; }

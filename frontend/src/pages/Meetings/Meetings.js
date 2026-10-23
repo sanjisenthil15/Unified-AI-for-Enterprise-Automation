@@ -289,7 +289,7 @@ function MeetingDetail({
           {analysis && <SummaryPanel analysis={analysis} />}
           {transcript && <TranscriptViewer transcript={transcript} />}
           {analysis && (
-            <ActionItemList meetingId={meetingId} items={actionItems} onAssigned={onActionItemsChanged} />
+            <ActionItemList meetingId={meetingId} projectId={detail.project_id} items={actionItems} onAssigned={onActionItemsChanged} />
           )}
         </>
       )}

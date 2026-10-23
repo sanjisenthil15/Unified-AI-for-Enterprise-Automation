@@ -28,11 +28,12 @@ export const ACCEPTED_EXTENSIONS = [
  * @param {{ title: string, description?: string, meetingDate?: string, file: File }} payload
  * @returns {Promise<object>} the created meeting (status = "pending")
  */
-export async function uploadMeeting({ title, description, meetingDate, file }) {
+export async function uploadMeeting({ title, description, meetingDate, projectId, file }) {
   const form = new FormData();
   form.append('title', title);
   if (description) form.append('description', description);
   if (meetingDate) form.append('meeting_date', meetingDate);
+  if (projectId) form.append('project_id', projectId);
   form.append('file', file);
 
   const res = await axiosInstance.post('/api/v1/meetings', form, {
@@ -74,6 +75,19 @@ export async function assignActionItem(id, actionItemId, userId) {
   const res = await axiosInstance.patch(
     `/api/v1/meetings/${id}/action-items/${actionItemId}/assign`,
     { assigned_to_user_id: userId || null },
+  );
+  return res.data;
+}
+
+/**
+ * POST /api/v1/meetings/{id}/action-items/{actionItemId}/convert
+ * Turns an action item into an assigned Sprint task. The meeting must
+ * already be linked to a project (see uploadMeeting's projectId).
+ */
+export async function convertActionItem(id, actionItemId, { sprintId, assigneeId, dueDate }) {
+  const res = await axiosInstance.post(
+    `/api/v1/meetings/${id}/action-items/${actionItemId}/convert`,
+    { sprint_id: sprintId, assignee_id: assigneeId, due_date: dueDate || null },
   );
   return res.data;
 }

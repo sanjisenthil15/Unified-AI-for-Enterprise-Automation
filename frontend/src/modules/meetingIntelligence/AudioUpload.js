@@ -6,8 +6,9 @@
  * meeting (status = "pending"); the parent then starts polling for progress.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ACCEPTED_EXTENSIONS, uploadMeeting } from '../../api/meetingApi';
+import { listProjects } from '../../api/employeeApi';
 import { apiErrorMessage } from './helpers';
 import RecordAudio from './RecordAudio';
 
@@ -23,9 +24,13 @@ export default function AudioUpload({ onUploaded, onCancel }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [meetingDate, setMeetingDate] = useState('');
+  const [projectId, setProjectId] = useState('');
+  const [projects, setProjects] = useState([]);
   const [file, setFile] = useState(null);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => { listProjects().then(setProjects).catch(() => {}); }, []);
 
   function chooseMode(next) {
     setMode(next);
@@ -54,6 +59,7 @@ export default function AudioUpload({ onUploaded, onCancel }) {
         title: title.trim(),
         description: description.trim() || undefined,
         meetingDate: meetingDate || undefined,
+        projectId: projectId || undefined,
         file,
       });
       setFile(null);
@@ -113,6 +119,15 @@ export default function AudioUpload({ onUploaded, onCancel }) {
             onChange={(e) => setMeetingDate(e.target.value)}
             disabled={submitting}
           />
+        </label>
+
+        <label className="mi-field">
+          <span>Project (optional)</span>
+          <select value={projectId} onChange={(e) => setProjectId(e.target.value)} disabled={submitting}>
+            <option value="">None</option>
+            {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <small className="mi-hint">Link this meeting to a project to turn its action items into assigned sprint tasks afterward.</small>
         </label>
 
         <label className="mi-field mi-field-wide">
