@@ -56,6 +56,7 @@ export default function Chat() {
 
   const [selectedGroupId, setSelectedGroupId] = useState(null);
   const [channels, setChannels] = useState([]);
+  const [groupMembers, setGroupMembers] = useState([]);
   const [newChannelName, setNewChannelName] = useState('');
 
   const [activeConversation, setActiveConversation] = useState(null);
@@ -136,6 +137,7 @@ export default function Chat() {
     try {
       const detail = await getGroupDetail(groupId);
       setChannels(detail.channels);
+      setGroupMembers(detail.members);
     } catch {
       setError('Could not open this group.');
     }
@@ -273,6 +275,28 @@ export default function Chat() {
     return threads.find((t) => t.other_user_id === userId);
   }
 
+  // ── @mentions (channel messages only) ──────────────────────────
+  const mentionMatch = activeConversation?.kind === 'channel' ? draft.match(/@(\w*)$/) : null;
+  const mentionFragment = mentionMatch ? mentionMatch[1].toLowerCase() : null;
+  const mentionSuggestions = mentionFragment === null ? [] : [
+    ...('everyone'.startsWith(mentionFragment) ? [{ id: 'everyone', full_name: 'everyone' }] : []),
+    ...groupMembers.filter((m) => m.user_id !== myUserId && m.full_name.toLowerCase().includes(mentionFragment)),
+  ];
+
+  function handleSelectMention(name) {
+    setDraft((d) => d.replace(/@(\w*)$/, `@${name} `));
+  }
+
+  function renderMessageBody(body, isChannel) {
+    if (!isChannel || groupMembers.length === 0) return body;
+    const names = ['everyone', ...groupMembers.map((m) => m.full_name)].sort((a, b) => b.length - a.length);
+    const mentionTokens = new Set(names.map((n) => `@${n}`));
+    const pattern = new RegExp(`(@(?:${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')}))`, 'g');
+    return body.split(pattern).map((part, i) => (
+      mentionTokens.has(part) ? <span key={i} className="chat-mention">{part}</span> : part
+    ));
+  }
+
   return (
     <div className="module-page">
       <div className="module-page-header">
@@ -399,20 +423,32 @@ export default function Chat() {
                     {activeConversation.kind === 'channel' && m.sender_user_id !== myUserId && (
                       <div className="chat-bubble-sender">{m.sender_name}</div>
                     )}
-                    {m.body}
+                    {renderMessageBody(m.body, activeConversation.kind === 'channel')}
                   </div>
                 ))}
                 <div ref={messagesEndRef} />
               </div>
-              <form className="chat-composer" onSubmit={handleSend}>
-                <input
-                  className="field-input"
-                  placeholder="Type a message…"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                />
-                <button type="submit" className="btn-primary">Send</button>
-              </form>
+              <div className="chat-composer-wrap">
+                {mentionSuggestions.length > 0 && (
+                  <div className="chat-mention-dropdown">
+                    {mentionSuggestions.map((s) => (
+                      <div key={s.id ?? s.user_id} className="chat-mention-item"
+                        onClick={() => handleSelectMention(s.full_name)}>
+                        @{s.full_name}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <form className="chat-composer" onSubmit={handleSend}>
+                  <input
+                    className="field-input"
+                    placeholder={activeConversation.kind === 'channel' ? 'Type a message… (use @ to mention)' : 'Type a message…'}
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                  />
+                  <button type="submit" className="btn-primary">Send</button>
+                </form>
+              </div>
             </>
           )}
         </div>

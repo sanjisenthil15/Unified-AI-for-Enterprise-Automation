@@ -387,6 +387,14 @@ export default function Sprints() {
                     </>
                   )}
 
+                  {tasks.length === 0 ? (
+                    <div className="kanban-empty-state">
+                      <p>No tasks in this sprint yet.</p>
+                      {isManager && (
+                        <button className="btn-secondary" onClick={() => setShowTaskForm(true)}>+ New task</button>
+                      )}
+                    </div>
+                  ) : (
                   <div className="kanban-board">
                     {TASK_COLUMNS.map((col) => (
                       <div className="kanban-column" key={col.key}>
@@ -454,6 +462,7 @@ export default function Sprints() {
                       </div>
                     ))}
                   </div>
+                  )}
                 </div>
               )}
 

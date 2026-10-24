@@ -46,6 +46,19 @@
   margin-bottom: 0.4rem;
 }
 
+.kanban-empty-state {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  color: var(--text-muted);
+  background: #f8fafc;
+  border-radius: 10px;
+  margin-top: 1rem;
+}
+
+.kanban-empty-state p {
+  margin-bottom: 0.75rem;
+}
+
 .kanban-overdue {
   color: #dc2626;
   font-weight: 600;

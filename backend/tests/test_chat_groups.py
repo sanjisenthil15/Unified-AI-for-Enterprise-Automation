@@ -180,3 +180,33 @@ def test_delete_group_requires_manager_and_removes_everything(client, new_user, 
 
     groups = client.get(f"{CHAT_BASE}/groups", headers=lead["headers"]).json()
     assert not any(g["id"] == group["id"] for g in groups)
+
+
+def test_channel_mentions_notify_the_right_people(client, new_user, unique_email):
+    admin = new_user("Admin User")
+    project, lead = _make_project_with_lead(client, admin["headers"], unique_email)
+    alice = _onboard(client, admin["headers"], _tag(unique_email, "alice"), "Alice Smith", project_id=project["id"])
+    bob = _onboard(client, admin["headers"], _tag(unique_email, "bob"), "Bob Jones", project_id=project["id"])
+
+    group = client.post(f"{CHAT_BASE}/groups", headers=lead["headers"], json={
+        "project_id": project["id"], "name": "Team Group",
+        "member_user_ids": [alice["user_id"], bob["user_id"]],
+    }).json()
+    channels = client.get(f"{CHAT_BASE}/groups/{group['id']}/channels", headers=lead["headers"]).json()
+    channel_id = channels[0]["id"]
+
+    # Mention only Alice by name.
+    client.post(f"{CHAT_BASE}/channels/{channel_id}/messages", headers=lead["headers"],
+                json={"body": "@Alice Smith can you pick this up?"})
+
+    alice_notifications = client.get("/api/v1/notifications/me", headers=alice["headers"]).json()
+    bob_notifications = client.get("/api/v1/notifications/me", headers=bob["headers"]).json()
+    assert any(n["type"] == "mention" for n in alice_notifications)
+    assert not any(n["type"] == "mention" for n in bob_notifications)
+
+    # @everyone notifies everyone else in the group (not the sender).
+    client.post(f"{CHAT_BASE}/channels/{channel_id}/messages", headers=lead["headers"],
+                json={"body": "@everyone standup in 5 minutes"})
+
+    bob_notifications = client.get("/api/v1/notifications/me", headers=bob["headers"]).json()
+    assert any(n["type"] == "mention" for n in bob_notifications)

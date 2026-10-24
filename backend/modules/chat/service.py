@@ -471,6 +471,31 @@ def get_channel_messages(db: Session, current_user: User, channel_id: int, since
     return [_channel_message_response(m) for m in messages]
 
 
+def _notify_channel_mentions(db: Session, group_id: int, sender: User, body: str) -> None:
+    """WhatsApp-style @mentions: @Full Name notifies that one person,
+    @everyone notifies the whole group (minus the sender). Matched
+    longest-name-first so "@Vishal Raj" doesn't get shadowed by a
+    member literally named "Vishal"."""
+    members = (
+        db.query(ChatGroupMember).options(joinedload(ChatGroupMember.user))
+        .filter(ChatGroupMember.group_id == group_id).all()
+    )
+    others = [m for m in members if m.user_id != sender.id]
+
+    if "@everyone" in body:
+        for m in others:
+            create_notification(db, m.user_id, "mention", f"{sender.full_name} mentioned @everyone in a channel.", "/chat")
+        return
+
+    names_by_length = sorted(others, key=lambda m: len(m.user.full_name), reverse=True)
+    remaining = body
+    for m in names_by_length:
+        token = f"@{m.user.full_name}"
+        if token in remaining:
+            create_notification(db, m.user_id, "mention", f"{sender.full_name} mentioned you in a channel.", "/chat")
+            remaining = remaining.replace(token, "")
+
+
 def send_channel_message(db: Session, current_user: User, channel_id: int, body: str) -> dict:
     channel = _get_channel_for_member(db, current_user, channel_id)
     message = ChatChannelMessage(channel_id=channel.id, sender_user_id=current_user.id, body=body)
@@ -481,6 +506,7 @@ def send_channel_message(db: Session, current_user: User, channel_id: int, body:
         db.query(ChatChannelMessage).options(joinedload(ChatChannelMessage.sender))
         .filter(ChatChannelMessage.id == message.id).first()
     )
+    _notify_channel_mentions(db, channel.group_id, current_user, body)
     return _channel_message_response(message)
 
 
