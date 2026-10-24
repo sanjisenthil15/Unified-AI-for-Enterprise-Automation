@@ -314,6 +314,12 @@
   align-items: center;
   gap: 0.75rem;
   box-shadow: var(--shadow-sm);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.dash-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
 }
 
 .dash-kpi-icon {

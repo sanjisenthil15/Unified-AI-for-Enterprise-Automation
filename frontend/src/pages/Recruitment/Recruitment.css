@@ -119,7 +119,15 @@
 
 .data-table tr:last-child td { border-bottom: none; }
 
-.data-table tr:hover td { background: #f8fafc; }
+.data-table tr:hover td { background: var(--surface-muted, #f8fafc); }
+
+.data-table td { transition: background 0.12s; }
+
+.employee-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
 
 /* Badge */
 .badge {

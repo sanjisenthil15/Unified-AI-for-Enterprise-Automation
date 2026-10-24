@@ -126,14 +126,23 @@
   padding: 0.7rem 0.9rem;
   cursor: pointer;
   border-bottom: 1px solid var(--border, #e2e8f0);
+  transition: background 0.12s;
+}
+
+.chat-contact-main {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
 }
 
 .chat-contact-item:hover {
-  background: rgba(37, 99, 235, 0.06);
+  background: var(--primary-light, #eff6ff);
 }
 
 .chat-contact-item.active {
-  background: rgba(37, 99, 235, 0.12);
+  background: var(--primary-light, #eff6ff);
+  box-shadow: inset 3px 0 0 var(--primary);
 }
 
 .chat-contact-name {

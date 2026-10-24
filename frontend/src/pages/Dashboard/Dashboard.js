@@ -20,6 +20,7 @@ import { getMyEmployeeRecord, listProjects } from '../../api/employeeApi';
 import { getMyNotifications } from '../../api/notificationsApi';
 import { getLedProjects } from '../../utils/teamLead';
 import Avatar from '../../components/common/Avatar';
+import LoadingSpinner from '../../components/common/LoadingSpinner';
 import '../Recruitment/Recruitment.css';
 import '../HRDashboard/HRDashboard.css';
 import '../Sprints/Sprints.css';
@@ -172,7 +173,7 @@ export default function Dashboard() {
             <h1>Welcome, {firstName}!</h1>
           </div>
         </div>
-        <div className="content-panel"><p className="muted-note">Loading your dashboard…</p></div>
+        <div className="content-panel"><LoadingSpinner label="Loading your dashboard…" /></div>
       </div>
     );
   }

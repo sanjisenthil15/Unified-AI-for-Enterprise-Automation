@@ -10,7 +10,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { getMyNotifications, markNotificationRead } from '../api/notificationsApi';
 import Avatar from '../components/common/Avatar';
 import './AppLayout.css';
@@ -33,6 +33,7 @@ const NAV_ITEMS = [
 
 export default function AppLayout() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [user] = useState(() => {
     try { return JSON.parse(localStorage.getItem('user')) || null; }
@@ -206,7 +207,9 @@ export default function AppLayout() {
         </header>
 
         <main className="layout-content">
-          <Outlet />
+          <div className="route-fade" key={location.pathname}>
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

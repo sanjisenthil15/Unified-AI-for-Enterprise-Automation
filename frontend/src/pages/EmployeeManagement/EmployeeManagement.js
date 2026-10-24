@@ -13,6 +13,8 @@ import {
   listDepartments, listEmployees, listProjects, terminateEmployee, updateEmployee,
 } from '../../api/employeeApi';
 import { listRoles } from '../../api/authApi';
+import Avatar from '../../components/common/Avatar';
+import LoadingSpinner from '../../components/common/LoadingSpinner';
 import '../Recruitment/Recruitment.css';
 import '../HRDashboard/HRDashboard.css';
 
@@ -307,7 +309,7 @@ export default function EmployeeManagement() {
         )}
 
         {loading ? (
-          <p>Loading…</p>
+          <LoadingSpinner label="Loading employees…" />
         ) : employees.length === 0 ? (
           <p className="muted-note">No employees yet. Click "+ Onboard employee" to add one.</p>
         ) : (
@@ -326,7 +328,14 @@ export default function EmployeeManagement() {
             <tbody>
               {employees.map((emp) => (
                 <tr key={emp.id}>
-                  <td>{emp.user.full_name}<br /><small className="muted-note">{emp.user.email}</small></td>
+                  <td>
+                    <div className="employee-name-cell">
+                      <Avatar name={emp.user.full_name} email={emp.user.email} size={34} />
+                      <div>
+                        {emp.user.full_name}<br /><small className="muted-note">{emp.user.email}</small>
+                      </div>
+                    </div>
+                  </td>
                   <td>{emp.job_title}</td>
                   <td>{emp.department?.name || '—'}</td>
                   <td>{emp.project?.name || '—'}</td>

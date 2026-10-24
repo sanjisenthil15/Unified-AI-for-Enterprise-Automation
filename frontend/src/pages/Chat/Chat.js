@@ -21,6 +21,7 @@ import {
 import { getMyEmployeeRecord, listProjects } from '../../api/employeeApi';
 import { getTeamAttendance } from '../../api/attendanceApi';
 import { getLedProjects } from '../../utils/teamLead';
+import Avatar from '../../components/common/Avatar';
 import '../Recruitment/Recruitment.css';
 import '../HRDashboard/HRDashboard.css';
 import './Chat.css';
@@ -377,9 +378,12 @@ export default function Chat() {
                   className={`chat-contact-item${activeConversation?.kind === 'dm' && activeConversation.otherUserId === c.user_id ? ' active' : ''}`}
                   onClick={() => openWithUser(c.user_id)}
                 >
-                  <div>
-                    <div className="chat-contact-name">{c.full_name}</div>
-                    <div className="chat-contact-role">{c.job_title || c.role}</div>
+                  <div className="chat-contact-main">
+                    <Avatar name={c.full_name} size={30} />
+                    <div>
+                      <div className="chat-contact-name">{c.full_name}</div>
+                      <div className="chat-contact-role">{c.job_title || c.role}</div>
+                    </div>
                   </div>
                   {thread?.unread_count > 0 && <span className="chat-unread-dot" aria-label="Unread messages" />}
                 </div>

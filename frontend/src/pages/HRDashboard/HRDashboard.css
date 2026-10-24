@@ -57,7 +57,7 @@
 .field-select:focus {
   border-color: var(--primary);
   background: #fff;
-  box-shadow: 0 0 0 3px rgba(37,99,235,.1);
+  box-shadow: 0 0 0 3px rgba(124,92,252,.14);
 }
 
 /* Buttons */
@@ -79,16 +79,17 @@
 .btn-secondary {
   padding: 0.65rem 1.2rem;
   background: var(--primary-light);
-  color: var(--primary);
-  border: 1px solid rgba(37,99,235,.25);
+  color: var(--primary-dark);
+  border: 1px solid rgba(124,92,252,.25);
   border-radius: 8px;
   font-size: 0.88rem;
   font-weight: 600;
   font-family: var(--font);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s, transform 0.15s;
 }
-.btn-secondary:hover { background: #dbeafe; }
+.btn-secondary:hover { background: #e4dcfe; transform: translateY(-1px); }
+.btn-secondary:active, .btn-primary:active { transform: translateY(0); }
 
 /* Upload area */
 .upload-area {
