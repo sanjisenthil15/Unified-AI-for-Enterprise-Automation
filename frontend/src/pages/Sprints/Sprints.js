@@ -260,7 +260,12 @@ export default function Sprints() {
         <div><h1>Sprints</h1><p>Weekly sprints, task assignments, and team progress.</p></div>
       </div>
 
-      {error && <div className="alert error">{error}</div>}
+      {error && (
+        <div className="alert error" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>{error}</span>
+          <button className="btn-secondary" onClick={() => { setLoading(true); load(); }}>Try again</button>
+        </div>
+      )}
 
       {notOnboarded && !allProjects.length ? (
         <div className="content-panel"><p className="muted-note">No employee record yet — contact HR to be onboarded.</p></div>

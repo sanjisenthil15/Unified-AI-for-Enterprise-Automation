@@ -152,7 +152,12 @@ export default function Attendance() {
         <div><h1>Attendance</h1><p>Check in and out, track your history, and plan leave.</p></div>
       </div>
 
-      {error && <div className="alert error">{error}</div>}
+      {error && (
+        <div className="alert error" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>{error}</span>
+          <button className="btn-secondary" onClick={() => { setLoading(true); load(); }}>Try again</button>
+        </div>
+      )}
 
       {notOnboarded ? (
         <div className="content-panel">
