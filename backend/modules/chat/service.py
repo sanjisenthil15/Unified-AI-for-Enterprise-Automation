@@ -418,6 +418,27 @@ def list_channels(db: Session, current_user: User, group_id: int) -> list[ChatCh
     return db.query(ChatChannel).filter(ChatChannel.group_id == group.id).order_by(ChatChannel.created_at).all()
 
 
+def delete_channel(db: Session, current_user: User, current_employee: Employee | None, channel_id: int) -> None:
+    channel = db.query(ChatChannel).options(joinedload(ChatChannel.group)).filter(ChatChannel.id == channel_id).first()
+    if channel is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Channel id={channel_id} not found.")
+    assert_project_manager(db, current_user, current_employee, channel.group.project_id)
+
+    remaining = db.query(ChatChannel).filter(ChatChannel.group_id == channel.group_id).count()
+    if remaining <= 1:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A group must keep at least one channel.")
+
+    db.delete(channel)  # cascades to its messages
+    db.commit()
+
+
+def delete_group(db: Session, current_user: User, current_employee: Employee | None, group_id: int) -> None:
+    group = _get_group_or_404(db, group_id)
+    assert_project_manager(db, current_user, current_employee, group.project_id)
+    db.delete(group)  # cascades to channels, messages, and members
+    db.commit()
+
+
 def _get_channel_for_member(db: Session, current_user: User, channel_id: int) -> ChatChannel:
     channel = db.query(ChatChannel).options(joinedload(ChatChannel.group)).filter(ChatChannel.id == channel_id).first()
     if channel is None:

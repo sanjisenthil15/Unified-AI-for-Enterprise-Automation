@@ -18,7 +18,7 @@ const NOTIFICATION_POLL_MS = 20000;
 
 const NAV_ITEMS = [
   { to: '/dashboard',        icon: '🏠', label: 'Dashboard',            roles: null },
-  { to: '/hr',                icon: '🧑‍💼', label: 'HR Recruitment',     roles: null },
+  { to: '/hr',                icon: '🧑‍💼', label: 'HR Recruitment',     roles: ['admin', 'hr_manager', 'recruiter'] },
   { to: '/customer-support',  icon: '🎧', label: 'Customer Support',    roles: null },
   { to: '/incidents',         icon: '🚨', label: 'Incident Management', roles: null },
   { to: '/meetings',          icon: '🎙️', label: 'Meetings',            roles: null },
@@ -26,7 +26,6 @@ const NAV_ITEMS = [
   { to: '/attendance',        icon: '🕒', label: 'Attendance',          roles: null },
   { to: '/sprints',           icon: '🏃', label: 'Sprints',             roles: null },
   { to: '/chat',              icon: '💬', label: 'Team Chat',           roles: null },
-  { to: '/analytics',         icon: '📊', label: 'Analytics',           roles: null },
   { to: '/profile',           icon: '👤', label: 'My Profile',          roles: null },
 ];
 

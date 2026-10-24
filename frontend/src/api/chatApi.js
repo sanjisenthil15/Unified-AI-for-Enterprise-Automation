@@ -93,3 +93,11 @@ export async function markChannelRead(channelId) {
   const res = await axiosInstance.post(`${BASE}/channels/${channelId}/read`);
   return res.data;
 }
+
+export async function deleteChannel(channelId) {
+  await axiosInstance.delete(`${BASE}/channels/${channelId}`);
+}
+
+export async function deleteGroup(groupId) {
+  await axiosInstance.delete(`${BASE}/groups/${groupId}`);
+}

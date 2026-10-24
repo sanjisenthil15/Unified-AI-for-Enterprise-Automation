@@ -136,3 +136,47 @@ def test_admin_sees_and_can_post_in_groups_without_being_a_member(client, new_us
 
     messages = client.get(f"{CHAT_BASE}/channels/{general_channel_id}/messages", headers=lead["headers"]).json()
     assert any(m["body"] == "Checking in on the team." for m in messages)
+
+
+def test_delete_channel_requires_manager_and_keeps_at_least_one(client, new_user, unique_email):
+    admin = new_user("Admin User")
+    project, lead = _make_project_with_lead(client, admin["headers"], unique_email)
+    member = _onboard(client, admin["headers"], _tag(unique_email, "member"), "Member", project_id=project["id"])
+
+    group = client.post(f"{CHAT_BASE}/groups", headers=lead["headers"], json={
+        "project_id": project["id"], "name": "Team Group", "member_user_ids": [member["user_id"]],
+    }).json()
+    channel = client.post(f"{CHAT_BASE}/groups/{group['id']}/channels", headers=lead["headers"], json={"name": "leave"}).json()
+
+    # A plain member cannot delete a channel.
+    r = client.delete(f"{CHAT_BASE}/channels/{channel['id']}", headers=member["headers"])
+    assert r.status_code == 403
+
+    # The lead can delete the extra channel.
+    r = client.delete(f"{CHAT_BASE}/channels/{channel['id']}", headers=lead["headers"])
+    assert r.status_code == 204
+
+    # But not the last remaining one ("general").
+    channels = client.get(f"{CHAT_BASE}/groups/{group['id']}/channels", headers=lead["headers"]).json()
+    assert len(channels) == 1
+    r = client.delete(f"{CHAT_BASE}/channels/{channels[0]['id']}", headers=lead["headers"])
+    assert r.status_code == 400
+
+
+def test_delete_group_requires_manager_and_removes_everything(client, new_user, unique_email):
+    admin = new_user("Admin User")
+    project, lead = _make_project_with_lead(client, admin["headers"], unique_email)
+    member = _onboard(client, admin["headers"], _tag(unique_email, "member"), "Member", project_id=project["id"])
+
+    group = client.post(f"{CHAT_BASE}/groups", headers=lead["headers"], json={
+        "project_id": project["id"], "name": "Team Group", "member_user_ids": [member["user_id"]],
+    }).json()
+
+    r = client.delete(f"{CHAT_BASE}/groups/{group['id']}", headers=member["headers"])
+    assert r.status_code == 403
+
+    r = client.delete(f"{CHAT_BASE}/groups/{group['id']}", headers=lead["headers"])
+    assert r.status_code == 204
+
+    groups = client.get(f"{CHAT_BASE}/groups", headers=lead["headers"]).json()
+    assert not any(g["id"] == group["id"] for g in groups)

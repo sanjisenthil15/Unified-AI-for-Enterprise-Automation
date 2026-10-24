@@ -14,7 +14,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  createChannel, createGroup, getChannelMessages, getContacts, getGroupDetail,
+  createChannel, createGroup, deleteChannel, deleteGroup, getChannelMessages, getContacts, getGroupDetail,
   getMessages, listGroups, listThreads, markChannelRead, markThreadRead,
   openThread, sendChannelMessage, sendMessage,
 } from '../../api/chatApi';
@@ -100,6 +100,11 @@ export default function Chat() {
 
   const canCreateGroup = isOverride || ledProjects.length > 0;
   const groupProjectOptions = isOverride ? allProjects : ledProjects;
+  const ledProjectIds = ledProjects.map((p) => p.id);
+
+  function isManagerOfGroup(group) {
+    return isOverride || ledProjectIds.includes(group?.project_id);
+  }
 
   // ── Direct messages ────────────────────────────────────────────
   const openWithUser = useCallback(async (otherUserId) => {
@@ -187,6 +192,35 @@ export default function Chat() {
       openGroup(group.id);
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not create group.');
+    }
+  }
+
+  async function handleDeleteChannel(e, channelId) {
+    e.stopPropagation();
+    if (!window.confirm('Delete this channel and all its messages?')) return;
+    try {
+      await deleteChannel(channelId);
+      if (activeConversation?.kind === 'channel' && activeConversation.id === channelId) setActiveConversation(null);
+      const detail = await getGroupDetail(selectedGroupId);
+      setChannels(detail.channels);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not delete channel.');
+    }
+  }
+
+  async function handleDeleteGroup(e, groupId) {
+    e.stopPropagation();
+    if (!window.confirm('Delete this group, all its channels, and all messages? This cannot be undone.')) return;
+    try {
+      await deleteGroup(groupId);
+      if (selectedGroupId === groupId) {
+        setSelectedGroupId(null);
+        setChannels([]);
+        setActiveConversation(null);
+      }
+      await loadLists();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Could not delete group.');
     }
   }
 
@@ -297,7 +331,13 @@ export default function Chat() {
                   <div className="chat-contact-name"># {g.name}</div>
                   <div className="chat-contact-role">{g.project_name}</div>
                 </div>
-                {g.unread && <span className="chat-unread-dot" aria-label="Unread messages" />}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  {g.unread && <span className="chat-unread-dot" aria-label="Unread messages" />}
+                  {isManagerOfGroup(g) && (
+                    <button className="chat-delete-btn" title="Delete group"
+                      onClick={(e) => handleDeleteGroup(e, g.id)}>🗑</button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -332,6 +372,10 @@ export default function Chat() {
                 className={`chat-contact-item${activeConversation?.kind === 'channel' && activeConversation.id === c.id ? ' active' : ''}`}
                 onClick={() => openChannel(c)}>
                 <div className="chat-contact-name"># {c.name}</div>
+                {isManagerOfGroup(groups.find((g) => g.id === selectedGroupId)) && channels.length > 1 && (
+                  <button className="chat-delete-btn" title="Delete channel"
+                    onClick={(e) => handleDeleteChannel(e, c.id)}>🗑</button>
+                )}
               </div>
             ))}
             <form className="chat-new-channel-form" onSubmit={handleCreateChannel}>

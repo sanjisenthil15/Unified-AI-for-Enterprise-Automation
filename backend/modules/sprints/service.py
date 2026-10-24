@@ -145,10 +145,33 @@ def _generate_weekly_sprints_for_project(db: Session, project: Project, current_
     return [get_sprint(db, s.id) for s in created]
 
 
+def _sync_sprint_statuses(db: Session, project_id: int) -> None:
+    """Lazy, request-time status transition — no cron exists in this app
+    (same pattern as the burndown snapshot and overdue-task notification):
+    the sprint covering today becomes 'active' (so the burndown chart has
+    something to attach to and the board shows which week is "now"), and
+    any sprint whose end_date has passed becomes 'completed'. Never
+    touches a sprint a manager already moved by hand to e.g. 'blocked'-
+    adjacent states — only advances out of 'planned'/'active'."""
+    today = datetime.utcnow().date()
+    sprints = db.query(Sprint).filter(Sprint.project_id == project_id, Sprint.status != "completed").all()
+    changed = False
+    for sprint in sprints:
+        if sprint.end_date < today and sprint.status != "completed":
+            sprint.status = "completed"
+            changed = True
+        elif sprint.start_date <= today <= sprint.end_date and sprint.status == "planned":
+            sprint.status = "active"
+            changed = True
+    if changed:
+        db.commit()
+
+
 def list_sprints(db: Session, current_user: User, current_employee: Employee | None, project_id: int) -> list[Sprint]:
     project = _get_project(db, project_id)
     if not _is_project_member_or_manager(current_user, current_employee, project):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You're not a member of this project.")
+    _sync_sprint_statuses(db, project_id)
     return (
         db.query(Sprint)
         .options(joinedload(Sprint.project))

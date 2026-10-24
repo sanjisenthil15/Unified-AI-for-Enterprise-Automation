@@ -15,7 +15,6 @@ import IncidentManagement from './pages/IncidentManagement/IncidentManagement';
 import MeetingsHub        from './pages/Meetings/MeetingsHub';
 import Meetings           from './pages/Meetings/Meetings';
 import OnlineMeeting      from './pages/Meetings/OnlineMeeting';
-import Analytics          from './pages/Analytics/Analytics';
 import HRDashboard        from './pages/HRDashboard/HRDashboard';
 import EmployeeManagement from './pages/EmployeeManagement/EmployeeManagement';
 import Profile            from './pages/Profile/Profile';
@@ -76,11 +75,26 @@ export default function App() {
           <Route path="/meetings"         element={<MeetingsHub />} />
           <Route path="/meetings/offline" element={<Meetings />} />
           <Route path="/meetings/online"  element={<OnlineMeeting />} />
-          <Route path="/analytics"        element={<Analytics />} />
 
-          {/* HR recruitment — the real module. /recruitment kept as an alias. */}
-          <Route path="/hr"          element={<HRDashboard />} />
-          <Route path="/recruitment" element={<HRDashboard />} />
+          {/* HR recruitment — admin/hr_manager/recruiter only; regular
+              employees don't need visibility into hiring. /recruitment
+              kept as an alias. */}
+          <Route
+            path="/hr"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'hr_manager', 'recruiter']}>
+                <HRDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/recruitment"
+            element={
+              <ProtectedRoute allowedRoles={['admin', 'hr_manager', 'recruiter']}>
+                <HRDashboard />
+              </ProtectedRoute>
+            }
+          />
 
           {/* Employee Management — admin/hr_manager only; My Profile is open to everyone. */}
           <Route

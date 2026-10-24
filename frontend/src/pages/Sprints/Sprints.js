@@ -104,7 +104,16 @@ export default function Sprints() {
     try {
       const data = await listSprints(Number(pid));
       setSprints(data);
-      setSprintId((cur) => (data.some((s) => s.id === Number(cur)) ? cur : (data[0]?.id ?? '')));
+      setSprintId((cur) => {
+        if (data.some((s) => s.id === Number(cur))) return cur;
+        // listSprints is newest-first, so data[0] is the furthest-out
+        // (often still-empty) sprint — default to the one covering
+        // today instead, so a freshly-opened project lands somewhere
+        // with actual content, not a blank future week.
+        const today = todayStr();
+        const current = data.find((s) => s.start_date <= today && today <= s.end_date);
+        return current?.id ?? data[0]?.id ?? '';
+      });
     } catch {
       setError('Could not load sprints for this project.');
     }
@@ -270,7 +279,9 @@ export default function Sprints() {
                 <label>Sprint</label>
                 <select className="field-select" value={sprintId} onChange={(e) => setSprintId(e.target.value)}>
                   <option value="">Select a sprint…</option>
-                  {sprints.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.status})</option>)}
+                  {[...sprints].sort((a, b) => a.start_date.localeCompare(b.start_date)).map((s) => (
+                    <option key={s.id} value={s.id}>{s.name} ({s.status})</option>
+                  ))}
                 </select>
               </div>
               {isManager && projectId && (

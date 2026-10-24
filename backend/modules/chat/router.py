@@ -189,6 +189,26 @@ def list_channels(
     return [{"id": c.id, "name": c.name} for c in channels]
 
 
+@router.delete("/channels/{channel_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a channel (manager of that project; a group must keep at least one channel)")
+def delete_channel(
+    channel_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
+):
+    service.delete_channel(db, current_user, current_employee, channel_id)
+
+
+@router.delete("/groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a group and everything in it (manager of that project)")
+def delete_group(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
+):
+    service.delete_group(db, current_user, current_employee, group_id)
+
+
 @router.get("/channels/{channel_id}/messages", response_model=List[ChannelMessageResponse], summary="Poll for messages in a channel")
 def get_channel_messages(
     channel_id: int,

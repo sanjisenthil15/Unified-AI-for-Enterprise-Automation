@@ -62,16 +62,6 @@ const MODULES = [
     to: '/meetings',
   },
   {
-    id: 'analytics',
-    icon: '📊',
-    title: 'Analytics Dashboard',
-    description:
-      'Cross-module KPIs, trend charts, and real-time metrics visualised with Recharts for data-driven decisions.',
-    colorClass: 'card-analytics',
-    status: 'Active',
-    to: '/analytics',
-  },
-  {
     id: 'employee',
     icon: '👥',
     title: 'Employee Management',
