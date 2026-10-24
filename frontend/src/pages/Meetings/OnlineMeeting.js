@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { endOnlineMeeting, getMyActiveOnlineMeeting, startOnlineMeeting } from '../../api/onlineMeetingApi';
+import { getMyEmployeeRecord, listProjects } from '../../api/employeeApi';
+import { getLedProjects } from '../../utils/teamLead';
 import useLiveMeeting from '../../modules/meetingOnline/useLiveMeeting';
 import MicrophoneInput from '../../modules/meetingOnline/MicrophoneInput';
 import VideoCall from '../../modules/meetingOnline/VideoCall';
@@ -10,10 +12,20 @@ import '../Recruitment/Recruitment.css';
 import './Meetings.css';
 import './OnlineMeeting.css';
 
+function currentRole() {
+  try {
+    return JSON.parse(localStorage.getItem('user'))?.role?.name?.toLowerCase() ?? '';
+  } catch {
+    return '';
+  }
+}
+
 export default function OnlineMeeting() {
   const [params, setParams] = useSearchParams();
   const id = params.get('session');
   const [title, setTitle] = useState('');
+  const [projectId, setProjectId] = useState('');
+  const [eligibleProjects, setEligibleProjects] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [checkingResume, setCheckingResume] = useState(!id);
@@ -33,6 +45,27 @@ export default function OnlineMeeting() {
     return () => { cancelled = true; };
   }, [id, setParams]);
 
+  useEffect(() => {
+    if (id) return;
+    (async () => {
+      try {
+        const projects = await listProjects();
+        if (['admin', 'hr_manager'].includes(currentRole())) {
+          setEligibleProjects(projects);
+          return;
+        }
+        const me = await getMyEmployeeRecord().catch(() => null);
+        if (!me) return;
+        const led = getLedProjects(me.id, projects);
+        const mine = me.project ? [me.project] : [];
+        const merged = [...led, ...mine.filter((p) => !led.some((l) => l.id === p.id))];
+        setEligibleProjects(merged);
+      } catch {
+        // No project to tag — the dropdown just won't show.
+      }
+    })();
+  }, [id]);
+
   async function start(event) {
     event.preventDefault();
     if (busy) return;
@@ -42,7 +75,8 @@ export default function OnlineMeeting() {
       request.current = { title: title.trim(), id: crypto.randomUUID() };
     }
     try {
-      const meeting = await startOnlineMeeting(request.current.title, request.current.id);
+      const meeting = await startOnlineMeeting(request.current.title, request.current.id,
+        { projectId: projectId || undefined });
       setParams({ session: meeting.id });
     } catch (err) {
       const detail = err.response?.data?.detail;
@@ -62,11 +96,13 @@ export default function OnlineMeeting() {
       </div>
       <nav className="online-toolbar" aria-label="Meeting modes">
         <Link className="mi-btn mi-btn-ghost" to="/meetings">← Meeting types</Link>
+        <Link className="mi-btn mi-btn-ghost" to="/meetings/scheduled">Scheduled Meetings</Link>
         <Link className="mi-btn mi-btn-ghost" to="/meetings/offline">Offline Meeting</Link>
         {id && <Link className="mi-btn mi-btn-ghost" to="/meetings/online">Start / resume meeting</Link>}
       </nav>
       <p className="mi-muted">Sessions are private to your signed-in account (shared demo account in development).
-        Results stay in server memory for up to 24 hours after ending; a backend restart clears them.</p>
+        While a meeting is live, it only exists in server memory — once you end it, the transcript, AI
+        summary and action items are saved into your Meeting Intelligence history automatically.</p>
       {id ? <LiveSession key={id} id={id} /> : checkingResume ? (
         <div className="content-panel mi-panel"><p className="mi-muted">Checking for an active meeting…</p></div>
       ) : (
@@ -75,6 +111,16 @@ export default function OnlineMeeting() {
           <label htmlFor="online-title">Meeting title</label>
           <input id="online-title" value={title} onChange={(e) => setTitle(e.target.value)}
             required maxLength={255} placeholder="Project team sync" />
+          {eligibleProjects.length > 0 && (
+            <>
+              <label htmlFor="online-project">Project (optional)</label>
+              <select id="online-project" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                <option value="">No project — just a transcript</option>
+                {eligibleProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <p className="mi-hint">Tag a project so action items can be assigned to a teammate with a deadline after the meeting.</p>
+            </>
+          )}
           <p>Continuously transcribes while you talk, and connects real video/audio via Jitsi Meet.</p>
           {error && <div role="alert" className="mi-error">{error}</div>}
           <button className="mi-btn mi-btn-primary" disabled={busy || !title.trim()}>
@@ -165,7 +211,14 @@ function LiveSession({ id }) {
           <button className="mi-btn mi-btn-ghost" disabled={!session} onClick={download}>Download results</button>
         </div>
         {session?.status === 'ending' && <p role="status">Finishing accepted input and final analysis. Transcript remains available.</p>}
-        {session?.status === 'ended' && <p role="status">Meeting ended. Results are retained temporarily; download them to keep a copy.</p>}
+        {session?.status === 'ended' && (
+          <p role="status">
+            {session.persisted
+              ? <>Meeting ended and saved to your <Link to="/meetings/offline">Meeting Intelligence history</Link>
+                  {session.project_id && ' — action items can be assigned there with a deadline.'}</>
+              : 'Meeting ended, but saving it to your Meeting Intelligence history failed. Download your results below to keep a copy.'}
+          </p>
+        )}
       </div>
       {error && <div className="mi-error" role="alert">{error}</div>}
       {active && <VideoCall meetingId={id} displayName={speaker} />}
@@ -228,7 +281,12 @@ function LiveSession({ id }) {
                 {item.confidence != null && ` · Confidence: ${Math.round(item.confidence * 100)}%`}</p>
             </li>
           ))}</ul>
-        ) : <p className="mi-muted">No action items extracted yet. No employee assignments are made automatically.</p>}
+        ) : <p className="mi-muted">No action items extracted yet.</p>}
+        <p className="mi-hint">
+          {session?.status === 'ended'
+            ? <>No assignments are made here — open this meeting in <Link to="/meetings/offline">Meeting Intelligence</Link> to assign an item to a teammate with a deadline, which adds it to their Sprint.</>
+            : 'Assigning an item to a teammate with a deadline happens after the meeting ends, in Meeting Intelligence.'}
+        </p>
       </section>
     </>
   );

@@ -2,8 +2,11 @@ import api from './axiosInstance';
 
 const BASE = '/api/v1/meetings/online';
 
-export async function startOnlineMeeting(title, requestId) {
-  return (await api.post(BASE, { title, request_id: requestId }, { timeout: 15000 })).data;
+export async function startOnlineMeeting(title, requestId, { meetingId, projectId } = {}) {
+  const payload = { title, request_id: requestId };
+  if (meetingId) payload.meeting_id = meetingId;
+  if (projectId) payload.project_id = projectId;
+  return (await api.post(BASE, payload, { timeout: 15000 })).data;
 }
 
 /** The caller's own active online meeting, or null if they don't have one. */

@@ -58,6 +58,34 @@ class MeetingListItem(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Scheduling
+# --------------------------------------------------------------------------- #
+class ScheduleMeetingCreate(BaseModel):
+    """Books a future meeting for a project team. Every current member of
+    that project (plus the organizer) is invited and notified; starting an
+    Online Meeting against this booking later fills in the same record with
+    a transcript, AI analysis and action items — same as an uploaded
+    recording."""
+    title: str = Field(..., min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=4000)
+    project_id: int = Field(..., description="Which project team to invite")
+    scheduled_at: datetime
+
+
+class ScheduledMeetingOut(BaseModel):
+    id: int
+    title: str
+    description: str | None = None
+    project_id: int
+    project_name: str
+    organizer_user_id: int
+    organizer_name: str
+    scheduled_at: datetime
+    invitee_count: int
+    created_at: datetime
+
+
+# --------------------------------------------------------------------------- #
 # Speakers
 # --------------------------------------------------------------------------- #
 class SpeakerOut(BaseModel):

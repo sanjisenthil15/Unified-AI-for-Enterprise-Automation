@@ -18,12 +18,14 @@ from sqlalchemy.sql import func
 from config.database import Base
 
 # Pipeline states — see modules/meeting_intelligence/pipeline.py
+#   scheduled    : booked for a future time, no recording/transcript yet
 #   pending      : uploaded, background pipeline not started yet
 #   processing   : pipeline running (audio -> transcription -> diarization -> analysis)
 #   completed    : all stages succeeded
 #   failed       : an unrecoverable error (see error_message)
 # The granular *_ing values remain defined for optional finer-grained progress.
 MEETING_STATUSES = (
+    "scheduled",
     "pending",
     "processing",
     "extracting_audio",
@@ -63,6 +65,9 @@ class Meeting(Base):
     description  = Column(Text,         nullable=True)
     meeting_date = Column(DateTime(timezone=True), nullable=True,
                           comment="When the meeting actually took place")
+    scheduled_at = Column(DateTime(timezone=True), nullable=True,
+                          comment="When a 'scheduled' meeting is booked for — set at "
+                                  "schedule time, before any recording/transcript exists")
 
     # --- source media (stored on disk; DB holds the reference only) ------ #
     source_video_path     = Column(String(1024), nullable=True,

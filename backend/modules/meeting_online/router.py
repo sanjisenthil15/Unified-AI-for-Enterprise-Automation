@@ -6,9 +6,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
+from sqlalchemy.orm import Session
 
+from config.database import get_db
 from config.settings import settings
 from core.dependencies import get_current_user
+from models.meeting import Meeting
 from modules.meeting_online.schemas import ClientEvent, OnlineMeetingSession, StartMeeting
 from modules.meeting_online.service import service
 
@@ -23,8 +26,18 @@ router = APIRouter(prefix="/meetings/online", tags=["Online Meeting"], lifespan=
 
 
 @router.post("", response_model=OnlineMeetingSession, status_code=201)
-async def start_meeting(payload: StartMeeting, user=Depends(get_current_user)):
-    return service.create(user.id, payload)
+async def start_meeting(payload: StartMeeting, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    project_id = payload.project_id
+    linked_meeting_id = None
+    if payload.meeting_id is not None:
+        meeting = db.query(Meeting).filter(Meeting.id == payload.meeting_id).first()
+        if meeting is None or meeting.created_by != user.id:
+            raise HTTPException(404, "Scheduled meeting not found.")
+        if meeting.status != "scheduled":
+            raise HTTPException(409, "This meeting has already been started or isn't a scheduled booking.")
+        linked_meeting_id = meeting.id
+        project_id = meeting.project_id
+    return service.create(user.id, payload, project_id=project_id, linked_meeting_id=linked_meeting_id)
 
 
 @router.get("/mine", response_model=OnlineMeetingSession)
@@ -91,7 +104,7 @@ async def live_socket(ws: WebSocket, meeting_id: str):
                     if cid is not None:
                         raise ValueError("Already joined.")
                     candidate = str(event.client_id)
-                    speaker = await service.join(state, candidate, ws, identity["full_name"])
+                    speaker = await service.join(state, candidate, ws, identity["full_name"], identity["user_id"])
                     cid = candidate
                 elif event.type == "ping":
                     await service.send(state, ws, {"type": "pong"})

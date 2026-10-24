@@ -48,6 +48,8 @@ from modules.meeting_intelligence.schemas import (
     ConvertActionItem,
     MeetingListItem,
     MeetingResponse,
+    ScheduledMeetingOut,
+    ScheduleMeetingCreate,
     SpeakerOut,
     TranscriptResponse,
     TranscriptSegmentOut,
@@ -101,6 +103,59 @@ def list_meetings(
     current_user: User = Depends(get_current_user),
 ):
     return service.list_meetings(db, current_user.id, skip=skip, limit=limit)
+
+
+@router.post(
+    "/schedule",
+    response_model=ScheduledMeetingOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Book a future meeting for a project team (invites + notifies every member)",
+)
+def schedule_meeting(
+    payload: ScheduleMeetingCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
+):
+    meeting = service.schedule_meeting(
+        db,
+        organizer=current_user,
+        organizer_employee=current_employee,
+        title=payload.title,
+        description=payload.description,
+        project_id=payload.project_id,
+        scheduled_at=payload.scheduled_at,
+    )
+    return _scheduled_meeting_out(meeting)
+
+
+@router.get(
+    "/scheduled",
+    response_model=List[ScheduledMeetingOut],
+    summary="Upcoming scheduled meetings the caller organized or was invited to",
+)
+def list_scheduled(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
+):
+    meetings = service.list_scheduled_meetings(db, current_user, current_employee)
+    return [_scheduled_meeting_out(m) for m in meetings]
+
+
+def _scheduled_meeting_out(meeting) -> ScheduledMeetingOut:
+    return ScheduledMeetingOut(
+        id=meeting.id,
+        title=meeting.title,
+        description=meeting.description,
+        project_id=meeting.project_id,
+        project_name=meeting.project.name if meeting.project else "—",
+        organizer_user_id=meeting.created_by,
+        organizer_name=meeting.creator.full_name if meeting.creator else "—",
+        scheduled_at=meeting.scheduled_at,
+        invitee_count=len(meeting.participants),
+        created_at=meeting.created_at,
+    )
 
 
 @router.get("/{meeting_id}", response_model=MeetingResponse, summary="Meeting details + status")

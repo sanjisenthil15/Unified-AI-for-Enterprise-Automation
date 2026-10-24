@@ -100,3 +100,20 @@ export async function reprocessMeeting(id) {
 export async function deleteMeeting(id) {
   await axiosInstance.delete(`/api/v1/meetings/${id}`);
 }
+
+/**
+ * POST /api/v1/meetings/schedule — books a future meeting for a project
+ * team; every current member is invited + notified. Team-lead/admin/hr only.
+ */
+export async function scheduleMeeting({ title, description, projectId, scheduledAt }) {
+  const res = await axiosInstance.post('/api/v1/meetings/schedule', {
+    title, description: description || null, project_id: projectId, scheduled_at: scheduledAt,
+  });
+  return res.data;
+}
+
+/** GET /api/v1/meetings/scheduled — upcoming meetings the caller organized or was invited to. */
+export async function listScheduledMeetings() {
+  const res = await axiosInstance.get('/api/v1/meetings/scheduled');
+  return res.data;
+}

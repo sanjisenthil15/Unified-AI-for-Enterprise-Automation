@@ -24,6 +24,7 @@
    previously-undefined --bg-primary / --border-color, which fell back to a
    near-black background with dark navy text — effectively invisible. */
 .online-page .online-form input,
+.online-page .online-form select,
 .online-page .online-form textarea {
   width: 100%;
   box-sizing: border-box;
@@ -46,12 +47,14 @@
   color: var(--text-primary, #1e293b);
 }
 .online-page .online-form input:focus,
+.online-page .online-form select:focus,
 .online-page .online-form textarea:focus {
   outline: 2px solid var(--primary, #2563eb);
   outline-offset: -1px;
   border-color: transparent;
 }
 .online-page .online-form input:disabled,
+.online-page .online-form select:disabled,
 .online-page .online-form textarea:disabled {
   background: var(--bg, #f0f4f8);
   color: var(--text-muted, #94a3b8);

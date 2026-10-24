@@ -1,7 +1,11 @@
 """Single-process, owner-scoped online sessions with replaceable processors.
 
 Run one Uvicorn worker. Ended sessions are retained for 24 hours; restart clears
-everything. No ORM imports or persistence side effects belong in this service.
+everything. No ORM imports or persistence side effects belong in this service,
+with one deliberate exception: _persist() (called once, from _end()) writes
+the ended session into the offline Meeting history so it isn't lost when the
+24h in-memory retention expires — see its own docstring for why that's kept
+as a deferred import rather than a module-level one.
 """
 
 import asyncio
@@ -34,6 +38,8 @@ class SessionState:
     analysis_task: asyncio.Task | None = None
     last_analysis: float = 0
     end_task: asyncio.Task | None = None
+    project_id: int | None = None
+    linked_meeting_id: int | None = None
 
 
 class OnlineMeetingService:
@@ -51,7 +57,7 @@ class OnlineMeetingService:
                     del self.sessions[key]
         self.tickets = {k: v for k, v in self.tickets.items() if v[1] > time.monotonic()}
 
-    def create(self, owner_id, request):
+    def create(self, owner_id, request, project_id=None, linked_meeting_id=None):
         self.prune()
         for state in self.sessions.values():
             if state.owner_id != owner_id:
@@ -71,8 +77,10 @@ class OnlineMeetingService:
         view = OnlineMeetingSession(
             id=mid, title=request.title,
             websocket_path=f"/api/v1/meetings/online/{mid}/ws",
+            project_id=project_id, linked_meeting_id=linked_meeting_id,
         )
-        self.sessions[mid] = SessionState(owner_id, str(request.request_id), view)
+        self.sessions[mid] = SessionState(owner_id, str(request.request_id), view,
+                                           project_id=project_id, linked_meeting_id=linked_meeting_id)
         return view
 
     def find_active_for_owner(self, owner_id):
@@ -129,7 +137,7 @@ class OnlineMeetingService:
     async def snapshot(self, state):
         await self.broadcast(state, {"type": "snapshot", "session": state.view.model_dump(mode="json")})
 
-    async def join(self, state, cid, ws, display_name=None):
+    async def join(self, state, cid, ws, display_name=None, user_id=None):
         if cid in state.sockets:
             raise ValueError("This client is already connected in another socket.")
         participant = next((p for p in state.view.participants if p.client_id == cid), None)
@@ -137,10 +145,12 @@ class OnlineMeetingService:
             if len(state.view.participants) >= 16:
                 raise ValueError("Prototype speaker limit reached (16).")
             label = display_name or f"Speaker {len(state.view.participants) + 1}"
-            participant = Participant(client_id=cid, speaker=label)
+            participant = Participant(client_id=cid, speaker=label, user_id=user_id)
             state.view.participants.append(participant)
         elif display_name:
             participant.speaker = display_name
+        if participant.user_id is None:
+            participant.user_id = user_id
         participant.connected = True
         state.sockets[cid] = ws
         await self.send(state, ws, {"type": "join", "speaker": participant.speaker, "client_id": cid})
@@ -260,7 +270,51 @@ class OnlineMeetingService:
             await self._analysis(state, True)
         state.view.status = "ended"
         state.view.ended_at = now()
+        # Persist BEFORE the final broadcast, not after: the frontend closes
+        # its socket as soon as it sees "meeting_ended" (see
+        # useLiveMeeting.js), so a later broadcast would never arrive — the
+        # single "meeting_ended" payload must already carry the correct
+        # view.persisted value.
+        await self._persist(state)
         await self.broadcast(state, {"type": "meeting_ended", "session": state.view.model_dump(mode="json")})
+
+    async def _persist(self, state):
+        """Write the ended session into the offline Meeting history so it
+        survives the 24h in-memory retention and gets the same action-item
+        conversion flow as an uploaded recording. Deliberately the one
+        exception to this module's "no ORM/persistence" rule — the write
+        itself lives in modules.meeting_intelligence.service (imported here
+        only, not at module load time, to keep that the normal direction of
+        the dependency) and opens its own DB session since this runs as a
+        detached background task outside any request's session scope."""
+        from modules.meeting_intelligence.service import (
+            create_or_update_meeting_from_online_session,
+        )
+
+        def _write():
+            from config.database import SessionLocal
+            db = SessionLocal()
+            try:
+                return create_or_update_meeting_from_online_session(
+                    db,
+                    owner_id=state.owner_id,
+                    session=state.view,
+                    project_id=state.project_id,
+                    linked_meeting_id=state.linked_meeting_id,
+                )
+            finally:
+                db.close()
+
+        try:
+            meeting_id = await asyncio.to_thread(_write)
+            # Reused post-end: before ending this was "the scheduled meeting
+            # this session was started from" (if any); now it's "the Meeting
+            # row that now holds this session's transcript/analysis" — the
+            # same row in the scheduled case, a freshly created one otherwise.
+            state.view.linked_meeting_id = meeting_id
+            state.view.persisted = True
+        except Exception:
+            logger.exception("Could not persist ended online meeting %s to Meeting history.", state.view.id)
 
     async def shutdown(self):
         tasks = []

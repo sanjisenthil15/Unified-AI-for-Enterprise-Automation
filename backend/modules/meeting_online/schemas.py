@@ -15,6 +15,18 @@ class StartMeeting(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     title: str = Field(min_length=1, max_length=255)
     request_id: UUID
+    meeting_id: int | None = Field(
+        default=None,
+        description="A meeting this caller scheduled (status='scheduled') to start "
+                    "and fill in, instead of creating an unlinked ad-hoc session.",
+    )
+    project_id: int | None = Field(
+        default=None,
+        description="Tag an ad-hoc (not pre-scheduled) session with a project, so "
+                    "its action items can be converted into assigned Sprint tasks "
+                    "once the meeting ends. Ignored when meeting_id is set — that "
+                    "meeting's own project_id is used instead.",
+    )
 
 
 class TranscriptSegment(BaseModel):
@@ -50,6 +62,7 @@ class Participant(BaseModel):
     client_id: str
     speaker: str
     connected: bool = False
+    user_id: int | None = None
 
 
 class OnlineMeetingSession(BaseModel):
@@ -64,6 +77,15 @@ class OnlineMeetingSession(BaseModel):
     analysis_status: Literal["idle", "processing", "ready", "error"] = "idle"
     analysis_error: str | None = None
     websocket_path: str
+    project_id: int | None = None
+    linked_meeting_id: int | None = None
+    persisted: bool = Field(
+        default=False,
+        description="True once this ended session has been written into the "
+                    "offline Meeting history (models.Meeting) — see "
+                    "modules.meeting_intelligence.service."
+                    "create_or_update_meeting_from_online_session.",
+    )
 
 
 class ClientEvent(BaseModel):

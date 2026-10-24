@@ -19,6 +19,11 @@ export default function MeetingsHub() {
         <div><h1>Meetings</h1><p>Choose how you want to capture this meeting.</p></div>
       </div>
       <div className="meetings-hub-grid">
+        <Link to="/meetings/scheduled" className="content-panel mi-panel meetings-hub-card">
+          <span className="meetings-hub-icon" aria-hidden="true">📅</span>
+          <h2>Scheduled Meetings</h2>
+          <p>Book a future meeting for a project team — everyone is invited and notified automatically.</p>
+        </Link>
         <Link to="/meetings/offline" className="content-panel mi-panel meetings-hub-card">
           <span className="meetings-hub-icon" aria-hidden="true">📁</span>
           <h2>Offline Meeting</h2>
@@ -27,7 +32,7 @@ export default function MeetingsHub() {
         <Link to="/meetings/online" className="content-panel mi-panel meetings-hub-card">
           <span className="meetings-hub-icon" aria-hidden="true">📡</span>
           <h2>Online Meeting</h2>
-          <p>Start a live session — real video/audio calling, a shared invite link, and continuous transcription as you talk.</p>
+          <p>Start a live session — real video/audio calling, a shared invite link, and continuous transcription as you talk. Ends straight into your meeting history.</p>
         </Link>
       </div>
     </div>

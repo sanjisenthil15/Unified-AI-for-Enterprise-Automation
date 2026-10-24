@@ -11,17 +11,23 @@ are added in later phases via pipeline.py; nothing here starts processing.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from modules.meeting_online.schemas import OnlineMeetingSession
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from models.employee import Employee
 from models.meeting import Meeting
 from models.meeting_action_item import MeetingActionItem
 from models.meeting_analysis import MeetingAnalysis
+from models.meeting_participant import MeetingParticipant
 from models.meeting_speaker import MeetingSpeaker
 from models.meeting_transcript import MeetingTranscript
 from models.meeting_transcript_segment import MeetingTranscriptSegment
+from models.project import Project
 from models.user import User
 from modules.meeting_intelligence.config import meeting_settings
 from modules.meeting_intelligence.processing.analysis import (
@@ -121,6 +127,222 @@ def create_meeting(
         raise
     db.refresh(meeting)
     return meeting
+
+
+def schedule_meeting(
+    db: Session,
+    *,
+    organizer: User,
+    organizer_employee: Employee | None,
+    title: str,
+    description: str | None,
+    project_id: int,
+    scheduled_at: datetime,
+) -> Meeting:
+    """Books a future meeting for a project team. Every current member of
+    that project is invited (as a MeetingParticipant) and notified.
+    Starting an Online Meeting against this booking later fills in the
+    same row with a transcript/analysis/action items — see
+    create_or_update_meeting_from_online_session — so it ends up in the
+    same offline history and action-item-conversion flow as an uploaded
+    recording, no separate "scheduled meetings" data model to reconcile."""
+    from core.authorization import assert_project_manager
+    from modules.notifications.service import create_notification
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Project id={project_id} not found.")
+    assert_project_manager(db, organizer, organizer_employee, project_id)
+
+    if not title or not title.strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "A meeting title is required.")
+
+    meeting = Meeting(
+        created_by=organizer.id,
+        title=title.strip(),
+        description=description,
+        project_id=project_id,
+        scheduled_at=scheduled_at,
+        status="scheduled",
+    )
+    db.add(meeting)
+    db.flush()  # assigns meeting.id
+
+    members = (
+        db.query(Employee)
+        .filter(Employee.project_id == project_id, Employee.deleted_at.is_(None))
+        .all()
+    )
+    member_user_ids = {m.user_id for m in members if m.user_id}
+    notify_user_ids: set[int] = set()
+    for member in members:
+        db.add(MeetingParticipant(
+            meeting_id=meeting.id,
+            user_id=member.user_id,
+            employee_id=member.id,
+            display_name=member.user.full_name if member.user else f"Employee #{member.id}",
+            role="organizer" if member.user_id == organizer.id else "attendee",
+        ))
+        if member.user_id and member.user_id != organizer.id:
+            notify_user_ids.add(member.user_id)
+
+    if organizer.id not in member_user_ids:
+        db.add(MeetingParticipant(
+            meeting_id=meeting.id,
+            user_id=organizer.id,
+            employee_id=organizer_employee.id if organizer_employee else None,
+            display_name=organizer.full_name,
+            role="organizer",
+        ))
+
+    db.commit()
+    db.refresh(meeting)
+
+    for user_id in notify_user_ids:
+        create_notification(
+            db, user_id, "meeting",
+            f"{organizer.full_name} scheduled '{meeting.title}' for {scheduled_at:%b %d, %I:%M %p}.",
+            "/meetings/scheduled",
+        )
+    return meeting
+
+
+def list_scheduled_meetings(db: Session, current_user: User, current_employee: Employee | None) -> list[Meeting]:
+    """Upcoming (status='scheduled') meetings visible to the caller:
+    admin/hr_manager see every scheduled meeting; everyone else sees only
+    ones they organized or were invited to."""
+    query = db.query(Meeting).filter(Meeting.status == "scheduled")
+    if current_user.role.name not in ("admin", "hr_manager"):
+        invited_ids = db.query(MeetingParticipant.meeting_id).filter(
+            MeetingParticipant.user_id == current_user.id
+        )
+        query = query.filter((Meeting.created_by == current_user.id) | Meeting.id.in_(invited_ids))
+    return query.order_by(Meeting.scheduled_at.asc()).all()
+
+
+def create_or_update_meeting_from_online_session(
+    db: Session,
+    *,
+    owner_id: int,
+    session: "OnlineMeetingSession",
+    project_id: int | None,
+    linked_meeting_id: int | None,
+) -> int:
+    """Called once a live Online Meeting ends (see
+    modules/meeting_online/service.py's _end()) so the session stops being
+    in-memory-only (previously discarded 24h after ending) and shows up in
+    the same offline Meeting Intelligence history, transcript viewer and
+    action-item-to-Sprint-task conversion flow as an uploaded recording.
+
+    If `linked_meeting_id` points at a meeting this same user scheduled,
+    that row is filled in in place (status scheduled -> completed);
+    otherwise a new ad-hoc Meeting row is created."""
+    meeting = None
+    if linked_meeting_id is not None:
+        meeting = (
+            db.query(Meeting)
+            .filter(Meeting.id == linked_meeting_id, Meeting.created_by == owner_id)
+            .first()
+        )
+
+    if meeting is None:
+        meeting = Meeting(created_by=owner_id, title=session.title, project_id=project_id)
+        db.add(meeting)
+    else:
+        meeting.title = session.title
+        if project_id is not None:
+            meeting.project_id = project_id
+
+    meeting.meeting_date = session.started_at
+    if session.started_at and session.ended_at:
+        meeting.duration_sec = max(0, int((session.ended_at - session.started_at).total_seconds()))
+    meeting.status = "completed"
+    db.flush()  # assigns meeting.id for a new row
+
+    # Online participants are identified by display name; those who
+    # authenticated through the ws ticket also carry a user_id (see
+    # meeting_online's join()), which we resolve to an Employee here the
+    # same way an uploaded meeting's participants would be. Upsert by
+    # user_id rather than blind-insert: a linked scheduled meeting already
+    # has one MeetingParticipant row per invited project member (including
+    # the organizer), and the same person reconnecting mid-session gets a
+    # new client_id each time — both would otherwise collide with
+    # uq_meeting_participant_user.
+    existing_by_user = {
+        p.user_id: p for p in
+        db.query(MeetingParticipant)
+        .filter(MeetingParticipant.meeting_id == meeting.id, MeetingParticipant.user_id.isnot(None))
+        .all()
+    }
+    seen_user_ids: set[int] = set()
+    for participant in session.participants:
+        if participant.user_id is not None:
+            if participant.user_id in seen_user_ids:
+                continue
+            seen_user_ids.add(participant.user_id)
+        existing = existing_by_user.get(participant.user_id) if participant.user_id is not None else None
+        if existing is not None:
+            existing.display_name = participant.speaker[:255]
+            if participant.user_id == owner_id:
+                existing.role = "organizer"
+            continue
+        employee = None
+        if participant.user_id:
+            employee = db.query(Employee).filter(Employee.user_id == participant.user_id).first()
+        db.add(MeetingParticipant(
+            meeting_id=meeting.id,
+            user_id=participant.user_id,
+            employee_id=employee.id if employee else None,
+            display_name=participant.speaker[:255],
+            role="organizer" if participant.user_id == owner_id else "attendee",
+        ))
+
+    if session.transcript:
+        full_text = "\n".join(
+            f"{seg.speaker}: {seg.text}".strip() for seg in session.transcript if seg.text.strip()
+        ) or "(no transcript text)"
+        db.add(MeetingTranscript(
+            meeting_id=meeting.id,
+            full_text=full_text,
+            word_count=len(full_text.split()),
+            segment_count=len(session.transcript),
+        ))
+        for index, seg in enumerate(session.transcript):
+            db.add(MeetingTranscriptSegment(
+                meeting_id=meeting.id,
+                speaker_label=(seg.speaker or "")[:50],
+                seq=index,
+                start_ms=seg.start_ms,
+                end_ms=seg.end_ms,
+                text=seg.text,
+            ))
+
+    if session.analysis:
+        analysis = MeetingAnalysis(
+            meeting_id=meeting.id,
+            summary=session.analysis.summary,
+            key_points=session.analysis.key_points or None,
+            decisions=session.analysis.decisions or None,
+            model_provider=session.analysis.model_provider or "gemini",
+            model_name=session.analysis.model_name or None,
+        )
+        db.add(analysis)
+        db.flush()  # assigns analysis.id
+        for item in session.analysis.action_items:
+            db.add(MeetingActionItem(
+                meeting_id=meeting.id,
+                analysis_id=analysis.id,
+                description=item.description,
+                assignee_name_raw=item.assignee,
+                assignment_method="unassigned",
+                priority=item.priority,
+                status="pending",
+                source="ai",
+                ai_confidence=item.confidence,
+            ))
+
+    db.commit()
+    return meeting.id
 
 
 def get_meeting(db: Session, meeting_id: int) -> Meeting:

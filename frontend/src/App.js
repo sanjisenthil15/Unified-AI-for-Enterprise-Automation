@@ -15,6 +15,7 @@ import IncidentManagement from './pages/IncidentManagement/IncidentManagement';
 import MeetingsHub        from './pages/Meetings/MeetingsHub';
 import Meetings           from './pages/Meetings/Meetings';
 import OnlineMeeting      from './pages/Meetings/OnlineMeeting';
+import ScheduledMeetings  from './pages/Meetings/ScheduledMeetings';
 import HRDashboard        from './pages/HRDashboard/HRDashboard';
 import EmployeeManagement from './pages/EmployeeManagement/EmployeeManagement';
 import Profile            from './pages/Profile/Profile';
@@ -75,6 +76,7 @@ export default function App() {
           <Route path="/meetings"         element={<MeetingsHub />} />
           <Route path="/meetings/offline" element={<Meetings />} />
           <Route path="/meetings/online"  element={<OnlineMeeting />} />
+          <Route path="/meetings/scheduled" element={<ScheduledMeetings />} />
 
           {/* HR recruitment — admin/hr_manager/recruiter only; regular
               employees don't need visibility into hiring. /recruitment
