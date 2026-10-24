@@ -8,7 +8,7 @@
 
 /* Welcome banner */
 .hr-welcome {
-  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  background: var(--gradient-primary);
   border-radius: var(--radius);
   padding: 1.5rem 2rem;
   color: #fff;

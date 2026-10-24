@@ -7,30 +7,39 @@
 }
 
 :root {
-  /* Brand palette */
-  --primary:        #2563eb;
-  --primary-dark:   #1d4ed8;
-  --primary-light:  #eff6ff;
-  --accent:         #7c3aed;
+  /* Brand palette — lavender/violet enterprise theme */
+  --primary:        #7c5cfc;
+  --primary-dark:   #6342e8;
+  --primary-light:  #efeafe;
+  --accent:         #a78bfa;
+  --accent-dark:    #8b5cf6;
+  --gradient-primary: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+  --gradient-warm:    linear-gradient(135deg, #c4b5fd 0%, #fb923c 100%);
   --success:        #16a34a;
+  --success-light:  #ecfdf3;
   --warning:        #d97706;
+  --warning-light:  #fffbeb;
   --danger:         #dc2626;
+  --danger-light:   #fef2f2;
   --info:           #0891b2;
 
   /* Neutrals */
-  --bg:             #f0f4f8;
+  --bg:             #f4f2fb;
   --surface:        #ffffff;
-  --border:         #e2e8f0;
-  --text-primary:   #1e293b;
-  --text-secondary: #64748b;
-  --text-muted:     #94a3b8;
+  --surface-muted:  #f8f7fd;
+  --border:         #e9e5f7;
+  --text-primary:   #1e1b2e;
+  --text-secondary: #635f78;
+  --text-muted:     #9b96b3;
 
   /* Typography */
   --font:           'Segoe UI', system-ui, -apple-system, sans-serif;
-  --radius:         12px;
-  --shadow-sm:      0 1px 3px rgba(0,0,0,.08);
-  --shadow-md:      0 4px 16px rgba(0,0,0,.10);
-  --shadow-lg:      0 8px 32px rgba(0,0,0,.14);
+  --radius:         16px;
+  --radius-sm:      10px;
+  --radius-lg:      22px;
+  --shadow-sm:      0 1px 3px rgba(76,29,149,.06);
+  --shadow-md:      0 6px 20px rgba(76,29,149,.08);
+  --shadow-lg:      0 12px 36px rgba(76,29,149,.12);
 }
 
 html, body, #root {

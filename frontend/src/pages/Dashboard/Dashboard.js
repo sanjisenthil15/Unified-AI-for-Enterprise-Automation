@@ -19,6 +19,7 @@ import { getRecruitmentStats } from '../../api/recruitmentApi';
 import { getMyEmployeeRecord, listProjects } from '../../api/employeeApi';
 import { getMyNotifications } from '../../api/notificationsApi';
 import { getLedProjects } from '../../utils/teamLead';
+import Avatar from '../../components/common/Avatar';
 import '../Recruitment/Recruitment.css';
 import '../HRDashboard/HRDashboard.css';
 import '../Sprints/Sprints.css';
@@ -28,12 +29,23 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function currentRole() {
+function currentUser() {
   try {
-    return JSON.parse(localStorage.getItem('user'))?.role?.name?.toLowerCase() ?? '';
+    return JSON.parse(localStorage.getItem('user')) || null;
   } catch {
-    return '';
+    return null;
   }
+}
+
+function currentRole() {
+  return currentUser()?.role?.name?.toLowerCase() ?? '';
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
 }
 
 const TASK_STATUS_BADGE = { todo: 'purple', in_progress: 'blue', blocked: 'red', done: 'green' };
@@ -68,8 +80,10 @@ const MODULES = [
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const user = currentUser();
   const role = currentRole();
   const isOverride = ['admin', 'hr_manager'].includes(role);
+  const firstName = (user?.full_name || '').split(' ')[0] || 'there';
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -151,26 +165,105 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="module-page">
-        <div className="module-page-header">
-          <div className="module-page-icon blue" aria-hidden="true">🏠</div>
-          <div><h1>Dashboard</h1><p>Loading…</p></div>
+      <div className="module-page dash-page">
+        <div className="dash-welcome">
+          <div>
+            <p className="dash-welcome-eyebrow">{greeting()}</p>
+            <h1>Welcome, {firstName}!</h1>
+          </div>
         </div>
+        <div className="content-panel"><p className="muted-note">Loading your dashboard…</p></div>
       </div>
     );
   }
 
+  // Role-aware KPI strip + a single highlighted headline number, built
+  // only from data already fetched above — no invented percentages or
+  // comparison values where no real prior period exists.
+  const kpis = [];
+  let highlight = null;
+  if (isOverride) {
+    const flaggedTotal = overview.reduce((s, p) => s + (p.flagged_count || 0), 0);
+    const avgCompletion = overview.length
+      ? Math.round((overview.reduce((s, p) => s + p.completion_rate, 0) / overview.length) * 100)
+      : null;
+    kpis.push({ icon: '📁', label: 'Total Projects', value: overview.length });
+    kpis.push({ icon: '🚩', label: 'Flagged Employees', value: flaggedTotal, tone: flaggedTotal > 0 ? 'warn' : 'ok' });
+    if (recruitmentStats) {
+      kpis.push({ icon: '💼', label: 'Open Positions', value: recruitmentStats.open_positions });
+      kpis.push({ icon: '📝', label: 'Applications', value: recruitmentStats.applications });
+    }
+    if (avgCompletion != null) {
+      highlight = { label: 'Average completion across all projects', value: `${avgCompletion}%`, sub: `${overview.length} active project${overview.length === 1 ? '' : 's'}` };
+    }
+  } else if (!notOnboarded) {
+    const openTasks = myTasks.filter((t) => t.status !== 'done').length;
+    kpis.push({ icon: '✅', label: 'My Open Tasks', value: openTasks });
+    if (sprintProgress) {
+      const pct = sprintProgress.total ? Math.round((sprintProgress.done / sprintProgress.total) * 100) : 0;
+      kpis.push({ icon: '📈', label: "This Week's Progress", value: `${pct}%` });
+    }
+    kpis.push({ icon: '🔔', label: 'Unread Updates', value: recentActivity.length });
+    if (ledReviews.length > 0) {
+      const totalTasks = ledReviews.reduce((s, { entries }) => s + entries.reduce((x, e) => x + e.tasks_total, 0), 0);
+      const doneTasks = ledReviews.reduce((s, { entries }) => s + entries.reduce((x, e) => x + e.tasks_done, 0), 0);
+      const flaggedTeammates = ledReviews.reduce((s, { entries }) => s + entries.filter((e) => e.flagged).length, 0);
+      kpis.push({ icon: '👥', label: ledReviews.length === 1 ? 'Team Led' : 'Teams Led', value: ledReviews.length });
+      kpis.push({ icon: '🚩', label: 'Flagged Teammates', value: flaggedTeammates, tone: flaggedTeammates > 0 ? 'warn' : 'ok' });
+      highlight = {
+        label: `${ledReviews.length === 1 ? ledReviews[0].project.name : 'Your teams'} completion`,
+        value: `${totalTasks ? Math.round((doneTasks / totalTasks) * 100) : 0}%`,
+        sub: `${doneTasks} / ${totalTasks} tasks complete`,
+      };
+    } else if (sprintProgress) {
+      highlight = {
+        label: `This week — ${sprintProgress.name}`,
+        value: `${sprintProgress.total ? Math.round((sprintProgress.done / sprintProgress.total) * 100) : 0}%`,
+        sub: `${sprintProgress.done} / ${sprintProgress.total} tasks complete`,
+      };
+    }
+  }
+
   return (
-    <div className="module-page" style={{ maxWidth: 1200 }}>
-      <div className="module-page-header">
-        <div className="module-page-icon blue" aria-hidden="true">🏠</div>
-        <div><h1>Dashboard</h1><p>Your work, at a glance.</p></div>
+    <div className="module-page dash-page" style={{ maxWidth: 1200 }}>
+      <div className="dash-welcome">
+        <div>
+          <p className="dash-welcome-eyebrow">{greeting()}</p>
+          <h1>Welcome, {firstName}!</h1>
+          <p className="dash-welcome-sub">Intelligent operations, automated workflows, and AI-powered business insights.</p>
+        </div>
+        <Avatar name={user?.full_name} email={user?.email} size={56} />
       </div>
 
       {error && (
         <div className="alert error" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>{error}</span>
           <button className="btn-secondary" onClick={() => { setLoading(true); load(); }}>Try again</button>
+        </div>
+      )}
+
+      {(kpis.length > 0 || highlight) && (
+        <div className="dash-overview-grid">
+          {highlight && (
+            <div className="dash-highlight-card">
+              <span className="dash-highlight-label">{highlight.label}</span>
+              <span className="dash-highlight-value">{highlight.value}</span>
+              <span className="dash-highlight-sub">{highlight.sub}</span>
+            </div>
+          )}
+          {kpis.length > 0 && (
+            <div className="dash-kpi-grid">
+              {kpis.map((k) => (
+                <div className="dash-kpi-card" key={k.label}>
+                  <span className={`dash-kpi-icon${k.tone ? ` tone-${k.tone}` : ''}`} aria-hidden="true">{k.icon}</span>
+                  <div>
+                    <span className="dash-kpi-value">{k.value}</span>
+                    <span className="dash-kpi-label">{k.label}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

@@ -210,12 +210,152 @@
 }
 
 /* ── Per-card accent colours via CSS custom properties ─────────── */
-.card-recruitment   { --card-accent: #2563eb; --card-bg-light: #eff6ff; }
-.card-support       { --card-accent: #7c3aed; --card-bg-light: #f5f3ff; }
+.card-recruitment   { --card-accent: #7c5cfc; --card-bg-light: #efeafe; }
+.card-support       { --card-accent: #8b5cf6; --card-bg-light: #f5f3ff; }
 .card-incident      { --card-accent: #dc2626; --card-bg-light: #fef2f2; }
 .card-meeting       { --card-accent: #0891b2; --card-bg-light: #ecfeff; }
 .card-analytics     { --card-accent: #d97706; --card-bg-light: #fffbeb; }
 .card-employee      { --card-accent: #16a34a; --card-bg-light: #f0fdf4; }
+
+/* ── Welcome header ──────────────────────────────────────────────── */
+.dash-page { max-width: 1200px; }
+
+.dash-welcome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-bottom: 1.75rem;
+}
+
+.dash-welcome-eyebrow {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 0.2rem;
+}
+
+.dash-welcome h1 {
+  font-size: 1.7rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+
+.dash-welcome-sub {
+  margin-top: 0.3rem;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+  max-width: 48ch;
+}
+
+/* ── KPI + highlight overview row ───────────────────────────────── */
+.dash-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) 1fr;
+  gap: 1.25rem;
+  margin-bottom: 1.75rem;
+}
+
+.dash-highlight-card {
+  background: var(--gradient-primary);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  box-shadow: var(--shadow-md);
+  position: relative;
+  overflow: hidden;
+}
+
+.dash-highlight-card::after {
+  content: '';
+  position: absolute;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.12);
+  top: -60px;
+  right: -60px;
+}
+
+.dash-highlight-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.dash-highlight-value {
+  font-size: 2.4rem;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+}
+
+.dash-highlight-sub {
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+
+.dash-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+}
+
+.dash-kpi-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.dash-kpi-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.dash-kpi-icon.tone-warn { background: var(--warning-light); }
+.dash-kpi-icon.tone-ok   { background: var(--success-light); }
+
+.dash-kpi-value {
+  display: block;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.dash-kpi-label {
+  display: block;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .dash-welcome {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .dash-overview-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 /* ── Responsive: 2 cols on tablet, 1 col on mobile ─────────────── */
 @media (max-width: 1024px) {

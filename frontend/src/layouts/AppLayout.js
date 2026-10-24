@@ -1,7 +1,7 @@
 /**
  * layouts/AppLayout.js
  *
- * Shared layout shell — sidebar + topbar + <Outlet>.
+ * Shared layout shell — slim icon sidebar + topbar + <Outlet>.
  *
  * Role-based sidebar: each item's `roles` (null = everyone) decides
  * whether it's shown for the current user's role. This only hides the
@@ -12,9 +12,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { getMyNotifications, markNotificationRead } from '../api/notificationsApi';
+import Avatar from '../components/common/Avatar';
 import './AppLayout.css';
 
 const NOTIFICATION_POLL_MS = 20000;
+const SIDEBAR_PREF_KEY = 'sidebar_expanded';
 
 const NAV_ITEMS = [
   { to: '/dashboard',        icon: '🏠', label: 'Dashboard',            roles: null },
@@ -43,9 +45,22 @@ export default function AppLayout() {
   const role         = authDisabled ? 'admin' : (user?.role?.name?.toLowerCase() ?? '');
   const displayName  = user?.full_name  ?? (authDisabled ? 'Demo Admin' : 'User');
   const displayRole  = user?.role?.name ?? (authDisabled ? 'admin' : '');
-  const avatarLetter = displayName.charAt(0).toUpperCase();
+  const displayEmail = user?.email ?? '';
 
   const navItems = NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(role));
+
+  const [expanded, setExpanded] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_PREF_KEY) === '1'; } catch { return false; }
+  });
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  function toggleExpanded() {
+    setExpanded((v) => {
+      const next = !v;
+      try { localStorage.setItem(SIDEBAR_PREF_KEY, next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }
 
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -76,42 +91,83 @@ export default function AppLayout() {
     navigate('/login');
   }
 
-  return (
-    <div className="app-layout">
+  // On mobile the sidebar is an overlay that's either hidden or fully
+  // open — there's no separate collapsed rail state there, so it always
+  // shows labels while open regardless of the desktop expand/collapse
+  // preference.
+  const showLabels = expanded || mobileOpen;
 
-      <aside className="sidebar" aria-label="Sidebar navigation">
+  return (
+    <div className={`app-layout${expanded ? ' is-expanded' : ''}`}>
+
+      <aside
+        className={`sidebar${expanded ? ' is-expanded' : ''}${mobileOpen ? ' is-mobile-open' : ''}`}
+        aria-label="Sidebar navigation"
+      >
         <div className="sidebar-brand">
-          <span className="sidebar-brand-icon" aria-hidden="true">⚡</span>
-          <span className="sidebar-brand-name">
-            Unified <span>AI</span><br />Enterprise
-          </span>
+          <span className="sidebar-brand-mark" aria-hidden="true">⚡</span>
+          {showLabels && <span className="sidebar-brand-name">EnterpriseAI</span>}
+          <button
+            type="button"
+            className="sidebar-collapse-toggle"
+            onClick={toggleExpanded}
+            aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+            title={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+          >
+            {expanded ? '«' : '»'}
+          </button>
         </div>
 
         <nav className="sidebar-nav" aria-label="Module navigation">
-          <span className="sidebar-section-label">Navigation</span>
           {navItems.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
               className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
               aria-label={item.label}
+              title={showLabels ? undefined : item.label}
+              onClick={() => setMobileOpen(false)}
             >
               <span className="sidebar-link-icon" aria-hidden="true">{item.icon}</span>
-              {item.label}
+              {showLabels && <span className="sidebar-link-label">{item.label}</span>}
             </NavLink>
           ))}
         </nav>
 
         <div className="sidebar-footer">
-          <button className="sidebar-logout" onClick={handleLogout} aria-label="Logout">
+          <div className="sidebar-user" title={displayName}>
+            <Avatar name={displayName} email={displayEmail} size={34} />
+            {showLabels && (
+              <div className="sidebar-user-text">
+                <span className="sidebar-user-name">{displayName}</span>
+                <span className="sidebar-user-role">{displayRole}</span>
+              </div>
+            )}
+          </div>
+          <button
+            className="sidebar-logout"
+            onClick={handleLogout}
+            aria-label="Logout"
+            title={showLabels ? undefined : 'Logout'}
+          >
             <span className="sidebar-link-icon" aria-hidden="true">🚪</span>
-            Logout
+            {showLabels && <span className="sidebar-link-label">Logout</span>}
           </button>
         </div>
       </aside>
 
+      {mobileOpen && <div className="sidebar-scrim" onClick={() => setMobileOpen(false)} aria-hidden="true" />}
+
       <div className="layout-body">
         <header className="layout-topbar" aria-label="Top navigation">
+          <button
+            type="button"
+            className="topbar-menu-toggle"
+            onClick={() => setMobileOpen((v) => !v)}
+            aria-label="Toggle navigation menu"
+          >
+            ☰
+          </button>
           <span className="topbar-page-title">Unified AI Enterprise Platform</span>
           <div className="topbar-right">
             <div className="topbar-notifications">
@@ -145,10 +201,7 @@ export default function AppLayout() {
               )}
             </div>
             <span className="topbar-badge">{displayRole}</span>
-            <div className="topbar-avatar" title={displayName}
-              aria-label={`Logged in as ${displayName}`} role="img">
-              {avatarLetter}
-            </div>
+            <Avatar name={displayName} email={displayEmail} size={36} />
           </div>
         </header>
 
