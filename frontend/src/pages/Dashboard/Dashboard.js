@@ -101,39 +101,44 @@ export default function Dashboard() {
         return;
       }
 
-      const me = await getMyEmployeeRecord().catch((err) => {
-        if (err.response?.status === 404) { setNotOnboarded(true); return null; }
-        throw err;
-      });
-
-      const [tasks, activity] = await Promise.all([
+      // These four are all independent of each other — fire together
+      // instead of awaiting one at a time, since this page loads on
+      // every single login.
+      const [me, tasks, activity, projects] = await Promise.all([
+        getMyEmployeeRecord().catch((err) => {
+          if (err.response?.status === 404) { setNotOnboarded(true); return null; }
+          throw err;
+        }),
         getMyTasks().catch(() => []),
         getMyNotifications({ unreadOnly: true }).catch(() => []),
+        listProjects().catch(() => []),
       ]);
       setMyTasks(tasks);
       setRecentActivity(activity.slice(0, 6));
 
       if (me) {
-        const projects = await listProjects().catch(() => []);
         const led = getLedProjects(me.id, projects);
-        if (led.length > 0) {
-          const reviews = await Promise.all(led.map(async (p) => {
-            const entries = await getManagerReview({ projectId: p.id }).catch(() => []);
-            return { project: p, entries };
-          }));
-          setLedReviews(reviews);
-        }
+        const ledReviewsPromise = led.length > 0
+          ? Promise.all(led.map(async (p) => {
+              const entries = await getManagerReview({ projectId: p.id }).catch(() => []);
+              return { project: p, entries };
+            }))
+          : Promise.resolve([]);
 
-        if (me.project) {
-          const sprints = await listSprints(me.project.id).catch(() => []);
-          const today = todayStr();
-          const current = sprints.find((s) => s.start_date <= today && today <= s.end_date);
-          if (current) {
-            const sprintTasks = await listTasks(current.id).catch(() => []);
-            const done = sprintTasks.filter((t) => t.status === 'done').length;
-            setSprintProgress({ name: current.name, done, total: sprintTasks.length });
-          }
-        }
+        const sprintProgressPromise = me.project
+          ? listSprints(me.project.id).catch(() => []).then(async (sprints) => {
+              const today = todayStr();
+              const current = sprints.find((s) => s.start_date <= today && today <= s.end_date);
+              if (!current) return null;
+              const sprintTasks = await listTasks(current.id).catch(() => []);
+              const done = sprintTasks.filter((t) => t.status === 'done').length;
+              return { name: current.name, done, total: sprintTasks.length };
+            })
+          : Promise.resolve(null);
+
+        const [reviews, progress] = await Promise.all([ledReviewsPromise, sprintProgressPromise]);
+        if (led.length > 0) setLedReviews(reviews);
+        if (progress) setSprintProgress(progress);
       }
     } catch {
       setError('Could not load your dashboard.');
