@@ -51,34 +51,6 @@ function greeting() {
 
 const TASK_STATUS_BADGE = { todo: 'purple', in_progress: 'blue', blocked: 'red', done: 'green' };
 
-const MODULES = [
-  {
-    id: 'recruitment', icon: '🤖', title: 'AI Recruitment',
-    description: 'Automate resume screening, rank candidates by fit score, and schedule interviews with AI-driven insights.',
-    colorClass: 'card-recruitment', status: 'Active', to: '/hr',
-  },
-  {
-    id: 'support', icon: '🎧', title: 'Customer Support',
-    description: 'AI-powered ticket management with automatic replies, priority triage, and real-time escalation detection.',
-    colorClass: 'card-support', status: 'Active', to: '/customer-support',
-  },
-  {
-    id: 'incident', icon: '🚨', title: 'Incident Management',
-    description: 'Log, triage, and resolve incidents faster. AI suggests severity levels and assigns the right team automatically.',
-    colorClass: 'card-incident', status: 'Active', to: '/incidents',
-  },
-  {
-    id: 'meeting', icon: '🎙️', title: 'Meeting Intelligence',
-    description: 'Upload audio recordings. Get Whisper transcriptions, Gemini summaries, and action-item extraction instantly.',
-    colorClass: 'card-meeting', status: 'Active', to: '/meetings',
-  },
-  {
-    id: 'employee', icon: '👥', title: 'Employee Management',
-    description: 'Manage employee profiles, departments, and roles. AI-generated performance insights keep HR proactive.',
-    colorClass: 'card-employee', status: 'Active', to: '/employees',
-  },
-];
-
 export default function Dashboard() {
   const navigate = useNavigate();
   const user = currentUser();
@@ -407,34 +379,6 @@ export default function Dashboard() {
           </div>
         </>
       )}
-
-      <div className="content-panel">
-        <h2>Quick Links</h2>
-        <div className="modules-grid" role="list" aria-label="Enterprise module cards">
-          {MODULES.map((mod) => (
-            <article
-              key={mod.id}
-              className={`module-card ${mod.colorClass}`}
-              role="listitem"
-              tabIndex={0}
-              aria-label={`${mod.title} module`}
-              onClick={() => navigate(mod.to)}
-              onKeyDown={(e) => e.key === 'Enter' && navigate(mod.to)}
-              style={{ cursor: 'pointer' }}
-            >
-              <div className="card-icon-wrap" aria-hidden="true">{mod.icon}</div>
-              <div className="card-body">
-                <h2 className="card-title">{mod.title}</h2>
-                <p className="card-description">{mod.description}</p>
-              </div>
-              <div className="card-footer">
-                <span className="card-status active">{mod.status}</span>
-                <span className="card-arrow" aria-hidden="true">→</span>
-              </div>
-            </article>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
