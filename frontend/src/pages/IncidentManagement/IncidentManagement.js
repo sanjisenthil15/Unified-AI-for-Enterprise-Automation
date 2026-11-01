@@ -47,9 +47,17 @@ const WRITE_ROLES  = ['admin', 'manager', 'support_agent'];
 const ASSIGN_ROLES = ['admin', 'manager', 'support_agent'];
 const REPORT_ROLES = ['admin', 'manager', 'hr_manager', 'support_agent', 'recruiter', 'employee'];
 
-function canWrite(user)  { return WRITE_ROLES.includes(user?.role?.name?.toLowerCase()); }
-function canAssign(user) { return ASSIGN_ROLES.includes(user?.role?.name?.toLowerCase()); }
-function canReport(user) { return REPORT_ROLES.includes(user?.role?.name?.toLowerCase()) || canWrite(user); }
+function getRoleName(user) {
+  if (!user) return '';
+  if (typeof user.role === 'string') return user.role.toLowerCase();
+  if (user.role?.name && typeof user.role.name === 'string') return user.role.name.toLowerCase();
+  if (user.role_name && typeof user.role_name === 'string') return user.role_name.toLowerCase();
+  return '';
+}
+
+function canWrite(user)  { return WRITE_ROLES.includes(getRoleName(user)); }
+function canAssign(user) { return ASSIGN_ROLES.includes(getRoleName(user)); }
+function canReport(user) { return REPORT_ROLES.includes(getRoleName(user)) || canWrite(user); }
 
 // ── component ────────────────────────────────────────────────────────
 
@@ -107,7 +115,8 @@ export default function IncidentManagement() {
       if (filterSev)    params.severity = filterSev;
       if (search)       params.search   = search;
       const data = await listIncidents(params);
-      setIncidents(data);
+
+      setIncidents(Array.isArray(data) ? data : (data?.items || []));
     } catch { setIncidents([]); }
     finally { setLoading(false); }
   }, [filterStatus, filterSev, search]);
@@ -132,7 +141,7 @@ export default function IncidentManagement() {
       getLatestTriage(inc.id).then(setTriage).catch(() => {});
     } catch { setSelected(inc); }
     finally { setDetailLoading(false); }
-    setTimeout(() => document.getElementById('inc-detail')?.scrollIntoView({ behavior: 'smooth' }), 80);
+    setTimeout(() => document.getElementById('inc-detail')?.scrollIntoView?.({ behavior: 'smooth' }), 80);
   }
 
   // ── create ────────────────────────────────────────────────────────
@@ -225,14 +234,31 @@ export default function IncidentManagement() {
   async function handleTriage() {
     if (!selected) return;
     setTriaging(true);
-    setTriageMsg({ type: 'info', text: 'Running Gemini AI triage...' });
+    setTriageMsg(null);
     try {
       const result = await runAITriage(selected.id);
       setTriage(result);
-      setTriageMsg({ type: 'success', text: 'AI triage complete.' });
+      setTriageMsg({ type: 'success', text: 'AI triage analysis completed successfully.' });
+
+      // Refresh incident details from server
+      const refreshed = await getIncident(selected.id);
+      setSelected(refreshed);
+      setIncidents(prev => prev.map(inc => inc.id === refreshed.id ? refreshed : inc));
+
+      // Refresh timeline if currently displayed
+      if (showTimeline) {
+        const entries = await getTimeline(selected.id);
+        setTimeline(entries);
+      }
+
+      // Refresh incident statistics
+      loadStats();
     } catch (err) {
-      setTriageMsg({ type: 'error', text: err.response?.data?.detail || 'AI triage failed.' });
-    } finally { setTriaging(false); }
+      const errorText = err.response?.data?.detail || err.message || 'AI triage failed. Please check Gemini API configuration.';
+      setTriageMsg({ type: 'error', text: errorText });
+    } finally {
+      setTriaging(false);
+    }
   }
 
   async function handleLoadTimeline() {
@@ -427,6 +453,7 @@ export default function IncidentManagement() {
               <tbody>
                 {incidents.map(inc => (
                   <tr key={inc.id}
+                    className="clickable-row"
                     style={{ cursor: 'pointer', background: selected?.id === inc.id ? '#eff6ff' : undefined }}
                     onClick={() => openDetail(inc)}>
                     <td><strong>INC-{String(inc.id).padStart(4, '0')}</strong></td>
@@ -555,19 +582,62 @@ export default function IncidentManagement() {
 
                 {/* AI Triage */}
                 <div className="inc-triage-section">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.75rem' }}>
-                    <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>🤖 AI Triage</span>
+                  <div className="inc-triage-header">
+                    <div className="inc-triage-title-wrap">
+                      <span className="inc-triage-title">🤖 AI Triage</span>
+                      {triage && (
+                        <span className="badge purple" style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem' }}>
+                          {triage.ai_model || 'Gemini 3.6 Flash'}
+                        </span>
+                      )}
+                    </div>
                     {canW && (
-                      <button className="btn-primary" style={{ padding: '0.4rem 1rem', fontSize: '0.82rem' }}
-                        onClick={handleTriage} disabled={triaging}>
-                        {triaging ? 'Analyzing...' : 'Run AI Triage'}
+                      <button
+                        type="button"
+                        className="btn-primary triage-run-btn"
+                        onClick={handleTriage}
+                        disabled={triaging}
+                        aria-label={triage ? 'Run AI Triage Again' : 'Run AI Triage'}
+                      >
+                        {triaging ? (
+                          <>
+                            <span className="btn-spinner" />
+                            Analyzing with Gemini...
+                          </>
+                        ) : triage ? (
+                          <>🔄 Run AI Triage Again</>
+                        ) : (
+                          <>✨ Run AI Triage</>
+                        )}
                       </button>
                     )}
                   </div>
 
-                  {triageMsg && <div className={`alert ${triageMsg.type}`} style={{ marginBottom: '0.75rem' }}>{triageMsg.text}</div>}
+                  {triageMsg && (
+                    <div className={`alert ${triageMsg.type}`} style={{ marginBottom: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>{triageMsg.text}</span>
+                      <button
+                        type="button"
+                        className="btn-link"
+                        style={{ padding: '0 0.5rem', fontSize: '0.8rem', color: 'inherit' }}
+                        onClick={() => setTriageMsg(null)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
 
-                  {triage && (
+                  {triaging && (
+                    <div className="inc-triage-loading" role="status" aria-live="polite">
+                      <div className="inc-triage-spinner-ring" />
+                      <div className="inc-triage-loading-text">
+                        <h4>Gemini AI is analyzing this incident...</h4>
+                        <p>Evaluating title, description, affected systems, and historical incident patterns for severity recommendation and root-cause analysis.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {!triaging && triage && (
                     <div className="detail-ai-grid">
                       <div className="detail-ai-cell">
                         <div className="detail-ai-label">Suggested Severity</div>
@@ -593,14 +663,40 @@ export default function IncidentManagement() {
                       </div>
                       <div className="detail-ai-cell" style={{ gridColumn: '1/-1' }}>
                         <div className="detail-ai-label">Reasoning</div>
-                        <div className="detail-ai-val">{triage.reasoning}</div>
+                        <div className="detail-ai-val" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{triage.reasoning}</div>
                       </div>
+                      {triage.generated_at && (
+                        <div className="detail-ai-cell" style={{ gridColumn: '1/-1', borderTop: '1px dashed var(--border)', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                            Generated on {fmt(triage.generated_at)}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   )}
-                  {!triage && !triageMsg && (
-                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                      No AI triage yet. Click "Run AI Triage" to analyze this incident with Gemini.
-                    </p>
+
+                  {!triaging && !triage && (
+                    <div className="inc-triage-empty">
+                      <div className="inc-triage-empty-icon">🤖</div>
+                      <div className="inc-triage-empty-content">
+                        <h4>No AI triage yet</h4>
+                        <p>
+                          {canW
+                            ? 'Click "Run AI Triage" to analyze this incident with Gemini AI for severity rating, recommended owner, and root-cause reasoning.'
+                            : 'No AI triage analysis has been performed yet for this incident. (Only Admin, Manager, and Support Agent roles can trigger AI triage).'}
+                        </p>
+                        {canW && (
+                          <button
+                            type="button"
+                            className="btn-primary inc-triage-cta-btn"
+                            onClick={handleTriage}
+                            disabled={triaging}
+                          >
+                            ✨ Run AI Triage
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
 
