@@ -12,17 +12,47 @@
 
 import React, { useState } from 'react';
 
+function currentUser() {
+  try {
+    return JSON.parse(localStorage.getItem('user')) || null;
+  } catch {
+    return null;
+  }
+}
+
+function formatRole(role) {
+  if (!role) return '';
+  return role.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export default function TicketDetailModal({
   ticket,
+  agents = [],
   onClose,
   onUpdateStatus,
+  onUpdateTicket,
   onAddMessage,
 }) {
   const [replyText, setReplyText] = useState('');
   const [isSubmittingReply, setIsSubmittingReply] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState(ticket?.status || 'open');
+  const [assignedTo, setAssignedTo] = useState(ticket?.assigned_to || '');
+
+  const me = currentUser();
+  const myRole = me?.role?.name?.toLowerCase() || '';
+  const canManage = ['admin', 'support_agent'].includes(myRole);
 
   if (!ticket) return null;
+
+  function handleAgentChange(e) {
+    const val = e.target.value;
+    const newAssignedTo = val ? Number(val) : 0;
+    setAssignedTo(val);
+    const updater = onUpdateTicket || onUpdateStatus;
+    if (updater) {
+      updater(ticket.id, { assigned_to: newAssignedTo });
+    }
+  }
 
   async function handleSendReply(e) {
     e.preventDefault();
@@ -110,8 +140,31 @@ export default function TicketDetailModal({
             <div className="cs-meta-cell">
               <span className="cs-cell-label">Assigned Team</span>
               <span className="cs-cell-val">
-                {ticket.team?.name || 'Support Pool'}
+                {ticket.team?.name || ticket.team_name || 'Unassigned'}
               </span>
+            </div>
+
+            <div className="cs-meta-cell">
+              <span className="cs-cell-label">Assigned Agent</span>
+              {canManage && agents && agents.length > 0 ? (
+                <select
+                  value={assignedTo || ''}
+                  onChange={handleAgentChange}
+                  className="cs-status-select"
+                  title="Assign to Support Agent"
+                >
+                  <option value="">Unassigned</option>
+                  {agents.map((ag) => (
+                    <option key={ag.id} value={ag.id}>
+                      {ag.full_name} ({ag.role === 'admin' ? 'Admin' : 'Agent'})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="cs-cell-val">
+                  {ticket.agent?.full_name || ticket.assigned_agent_name || 'Unassigned'}
+                </span>
+              )}
             </div>
 
             <div className="cs-meta-cell">
@@ -125,6 +178,9 @@ export default function TicketDetailModal({
               <span className="cs-cell-label">Customer</span>
               <span className="cs-cell-val">
                 {ticket.customer_name || 'Enterprise Customer'}
+                {ticket.customer_role && (
+                  <span className="cs-cust-role-badge"> ({formatRole(ticket.customer_role)})</span>
+                )}
               </span>
             </div>
           </div>

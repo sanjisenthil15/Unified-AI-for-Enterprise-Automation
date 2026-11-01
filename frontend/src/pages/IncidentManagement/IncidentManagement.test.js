@@ -18,6 +18,8 @@ jest.mock('../../api/incidentApi', () => ({
   runAITriage: jest.fn(),
   getLatestTriage: jest.fn(),
   getTimeline: jest.fn(),
+  listIncidentTeams: jest.fn(),
+  listTeamMembers: jest.fn(),
 }));
 
 const mockIncident = {
@@ -36,6 +38,31 @@ const mockIncident = {
   resolved_at: null,
   root_cause: null,
 };
+
+
+const mockTeams = [
+  {
+    id: 'proj_4',
+    team_id: 4,
+    team_type: 'project',
+    name: 'Customer Support Platform',
+    member_count: 2,
+    members: [
+      { user_id: 222, employee_id: 42, full_name: 'Sarathi', email: 'sarathi@employee.demo', job_title: 'Software Developer', role: 'employee', status: 'active' },
+      { user_id: 16288, employee_id: 5615, full_name: 'Aiden Cross', email: 'aiden.cross@employee.demo', job_title: 'Support Specialist', role: 'support_agent', status: 'active' },
+    ],
+  },
+  {
+    id: 'proj_2',
+    team_id: 2,
+    team_type: 'project',
+    name: 'Recruitment AI',
+    member_count: 1,
+    members: [
+      { user_id: 211, employee_id: 31, full_name: 'Sanjith', email: 'sanjith@employee.demo', job_title: 'Developer', role: 'employee', status: 'active' },
+    ],
+  },
+];
 
 const mockTriageResult = {
   id: 1,
@@ -69,6 +96,11 @@ describe('IncidentManagement AI Triage', () => {
     incidentApi.getIncident.mockResolvedValue(mockIncident);
     incidentApi.getLatestTriage.mockRejectedValue(new Error('No triage yet'));
     incidentApi.runAITriage.mockResolvedValue(mockTriageResult);
+    incidentApi.listIncidentTeams.mockResolvedValue(mockTeams);
+    incidentApi.listTeamMembers.mockImplementation(teamId => {
+      const match = mockTeams.find(t => t.id === teamId);
+      return Promise.resolve(match ? match.members : []);
+    });
   });
 
   afterEach(() => {
@@ -237,5 +269,273 @@ describe('IncidentManagement AI Triage', () => {
 
     // Informative message displayed
     expect(triageSection.textContent).toContain('No AI triage yet');
+  });
+
+  test('preselects AI-recommended team in assign modal when matching team exists', async () => {
+    incidentApi.getLatestTriage.mockResolvedValueOnce({
+      id: 1,
+      incident_id: 1,
+      suggested_owner: 'Customer Support Platform',
+      suggested_severity: 'high',
+    });
+
+    localStorage.setItem('user', JSON.stringify({
+      id: 2,
+      full_name: 'Elena Rostova',
+      role: { id: 7, name: 'manager' },
+    }));
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <IncidentManagement />
+        </MemoryRouter>
+      );
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    const row = container.querySelector('.clickable-row');
+    await act(async () => {
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    // Open Assign Modal
+    const assignBtn = Array.from(container.querySelectorAll('.inc-action-bar button')).find(b => b.textContent === 'Assign');
+    expect(assignBtn).toBeTruthy();
+
+    await act(async () => {
+      assignBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    // Verify modal opened
+    const modal = container.querySelector('.modal-overlay');
+    expect(modal).toBeTruthy();
+    expect(modal.textContent).toContain('Assign Incident');
+
+    // Verify AI recommendation banner is shown with Preselected badge
+    const matchedBanner = modal.querySelector('[data-testid="ai-rec-matched"]');
+    expect(matchedBanner).toBeTruthy();
+    expect(matchedBanner.textContent).toContain('Customer Support Platform');
+    expect(matchedBanner.textContent).toContain('Preselected');
+
+    // Verify Team select has Customer Support Platform selected
+    const teamSelect = modal.querySelector('#inc-assign-team');
+    expect(teamSelect).toBeTruthy();
+    expect(teamSelect.value).toBe('proj_4');
+
+    // Verify Employee select populated with active members of Customer Support Platform
+    const empSelect = modal.querySelector('#inc-assign-employee');
+    expect(empSelect).toBeTruthy();
+    const options = Array.from(empSelect.querySelectorAll('option'));
+    expect(options.some(o => o.textContent.includes('Sarathi'))).toBe(true);
+    expect(options.some(o => o.textContent.includes('Aiden Cross'))).toBe(true);
+  });
+
+  test('allows manager to override AI-recommended team and refreshes employee list', async () => {
+    incidentApi.getLatestTriage.mockResolvedValueOnce({
+      id: 1,
+      incident_id: 1,
+      suggested_owner: 'Customer Support Platform',
+      suggested_severity: 'high',
+    });
+
+    localStorage.setItem('user', JSON.stringify({
+      id: 2,
+      full_name: 'Elena Rostova',
+      role: { id: 7, name: 'manager' },
+    }));
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <IncidentManagement />
+        </MemoryRouter>
+      );
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    const row = container.querySelector('.clickable-row');
+    await act(async () => {
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    const assignBtn = Array.from(container.querySelectorAll('.inc-action-bar button')).find(b => b.textContent === 'Assign');
+    await act(async () => {
+      assignBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    const modal = container.querySelector('.modal-overlay');
+    const teamSelect = modal.querySelector('#inc-assign-team');
+
+    // Override team to Recruitment AI (proj_2)
+    await act(async () => {
+      teamSelect.value = 'proj_2';
+      teamSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    // Verify Override banner appears
+    const overrideBanner = modal.querySelector('[data-testid="ai-rec-overridden"]');
+    expect(overrideBanner).toBeTruthy();
+    expect(overrideBanner.textContent).toContain('Manager Override');
+    expect(overrideBanner.textContent).toContain('Customer Support Platform');
+
+    // Verify Employee select updated to Sanjith
+    const empSelect = modal.querySelector('#inc-assign-employee');
+    const options = Array.from(empSelect.querySelectorAll('option'));
+    expect(options.some(o => o.textContent.includes('Sanjith'))).toBe(true);
+  });
+
+  test('submits valid assignment with selected team and employee and updates incident details', async () => {
+    incidentApi.getLatestTriage.mockResolvedValueOnce({
+      id: 1,
+      incident_id: 1,
+      suggested_owner: 'Customer Support Platform',
+    });
+    incidentApi.assignIncident.mockResolvedValueOnce({
+      ...mockIncident,
+      assigned_to: 222,
+      assignee: { id: 222, full_name: 'Sarathi' },
+      team_name: 'Customer Support Platform',
+    });
+
+    localStorage.setItem('user', JSON.stringify({
+      id: 2,
+      full_name: 'Elena Rostova',
+      role: { id: 7, name: 'manager' },
+    }));
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <IncidentManagement />
+        </MemoryRouter>
+      );
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    const row = container.querySelector('.clickable-row');
+    await act(async () => {
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    const assignBtn = Array.from(container.querySelectorAll('.inc-action-bar button')).find(b => b.textContent === 'Assign');
+    await act(async () => {
+      assignBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    const modal = container.querySelector('.modal-overlay');
+    const empSelect = modal.querySelector('#inc-assign-employee');
+    const notesInput = modal.querySelector('#inc-assign-notes');
+
+    // Select employee Sarathi (222)
+    await act(async () => {
+      empSelect.value = '222';
+      empSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      nativeSetter.call(notesInput, 'Primary incident handler');
+      notesInput.dispatchEvent(new Event('input', { bubbles: true }));
+      notesInput.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    // Click Assign Incident
+    const submitBtn = Array.from(modal.querySelectorAll('button')).find(b => b.textContent === 'Assign Incident');
+    expect(submitBtn).toBeTruthy();
+    expect(submitBtn.disabled).toBe(false);
+
+    await act(async () => {
+      submitBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    // Verify assignIncident was called with expected payload
+    expect(incidentApi.assignIncident).toHaveBeenCalledWith(1, {
+      assigned_to: 222,
+      team_id: 'proj_4',
+      team_name: 'Customer Support Platform',
+      ai_recommended_team: 'Customer Support Platform',
+      notes: 'Primary incident handler',
+    });
+
+    // Modal closed
+    expect(container.querySelector('.modal-overlay')).toBeNull();
+
+    // Incident detail updated with assignee and team badge
+    const detailPanel = container.querySelector('#inc-detail');
+    expect(detailPanel.textContent).toContain('Sarathi');
+    expect(detailPanel.textContent).toContain('Customer Support Platform');
+  });
+
+  test('shows manual selection prompt when incident has no AI recommendation', async () => {
+    incidentApi.getLatestTriage.mockRejectedValueOnce(new Error('No triage'));
+
+    localStorage.setItem('user', JSON.stringify({
+      id: 2,
+      full_name: 'Elena Rostova',
+      role: { id: 7, name: 'manager' },
+    }));
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <IncidentManagement />
+        </MemoryRouter>
+      );
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    const row = container.querySelector('.clickable-row');
+    await act(async () => {
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    const assignBtn = Array.from(container.querySelectorAll('.inc-action-bar button')).find(b => b.textContent === 'Assign');
+    await act(async () => {
+      assignBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise(r => setTimeout(r, 60));
+    });
+
+    const modal = container.querySelector('.modal-overlay');
+    expect(modal).toBeTruthy();
+
+    // Verify manual banner appears
+    const manualBanner = modal.querySelector('[data-testid="ai-rec-none"]');
+    expect(manualBanner).toBeTruthy();
+    expect(manualBanner.textContent).toContain('Manual Team Selection');
   });
 });

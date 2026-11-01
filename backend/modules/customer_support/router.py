@@ -81,6 +81,7 @@ from modules.customer_support.schemas import (
     SupportRequestAnalysisResponse,
     SupportTeamCreate,
     SupportTeamResponse,
+    SupportAgentResponse,
     TicketCreateRequest,
     TicketDetailResponse,
     TicketEscalateRequest,
@@ -314,6 +315,14 @@ def create_team(
     return service.create_support_team(db=db, payload=payload)
 
 
+@router.get("/agents", response_model=List[SupportAgentResponse], summary="List eligible support agents for assignment")
+def list_support_agents(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return service.list_support_agents(db=db)
+
+
 # =============================================================================
 # 3. AI CHAT SESSIONS & GROUNDED CHATBOT
 # =============================================================================
@@ -400,6 +409,8 @@ def list_support_tickets(
     status: Optional[str] = Query(None, description="Filter by status (open, in_progress, escalated, resolved, closed)"),
     priority: Optional[str] = Query(None, description="Filter by priority (low, medium, high, critical)"),
     category_id: Optional[int] = Query(None),
+    team_id: Optional[int] = Query(None),
+    assigned_to: Optional[int] = Query(None),
     search: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
@@ -412,6 +423,8 @@ def list_support_tickets(
         status_filter=status,
         priority_filter=priority,
         category_id=category_id,
+        team_id=team_id,
+        assigned_to=assigned_to,
         search=search,
         skip=skip,
         limit=limit,

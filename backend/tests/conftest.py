@@ -147,6 +147,9 @@ def _cleanup_test_rows() -> None:
         conn.execute(text("DELETE FROM notifications WHERE user_id = ANY(:ids)"), {"ids": user_ids})
         # projects.manager_user_id is ON DELETE RESTRICT — clear it before the user
         conn.execute(text("UPDATE projects SET manager_user_id = NULL WHERE manager_user_id = ANY(:ids)"), {"ids": user_ids})
+        conn.execute(text("DELETE FROM incident_timeline WHERE actor_id = ANY(:ids) OR incident_id IN (SELECT id FROM incidents WHERE reported_by = ANY(:ids) OR assigned_to = ANY(:ids))"), {"ids": user_ids})
+        conn.execute(text("DELETE FROM incident_ai_triage WHERE incident_id IN (SELECT id FROM incidents WHERE reported_by = ANY(:ids) OR assigned_to = ANY(:ids))"), {"ids": user_ids})
+        conn.execute(text("DELETE FROM incidents WHERE reported_by = ANY(:ids) OR assigned_to = ANY(:ids)"), {"ids": user_ids})
         # employees.user_id is ON DELETE RESTRICT — must clear it before the user
         conn.execute(text("DELETE FROM employees WHERE user_id = ANY(:ids)"), {"ids": user_ids})
         conn.execute(text("DELETE FROM users WHERE id = ANY(:ids)"), {"ids": user_ids})

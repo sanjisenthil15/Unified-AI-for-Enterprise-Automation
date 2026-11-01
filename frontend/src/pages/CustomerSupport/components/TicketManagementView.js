@@ -14,10 +14,16 @@
 
 import React, { useState, useEffect } from 'react';
 
+function formatRole(role) {
+  if (!role) return '';
+  return role.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export default function TicketManagementView({
   tickets,
   isLoading,
   categories,
+  agents = [],
   initialStatusFilter = 'ALL',
   onSelectTicket,
   onOpenCreateTicket,
@@ -224,6 +230,7 @@ export default function TicketManagementView({
                 <th>Status</th>
                 <th>SLA Countdown</th>
                 <th>Assigned Team</th>
+                <th>Assigned Agent</th>
                 <th>Created</th>
                 <th>Actions</th>
               </tr>
@@ -241,7 +248,12 @@ export default function TicketManagementView({
                   <td className="cs-tkt-subject-cell">
                     <div className="cs-tkt-subject">{t.subject}</div>
                     <div className="cs-tkt-customer-sub">
-                      {t.customer_name || 'Enterprise Customer'} • {t.customer_email || 'Verified Account'}
+                      {t.customer_name || 'Enterprise Customer'}
+                      {t.customer_role && (
+                        <span className="cs-cust-role-badge"> ({formatRole(t.customer_role)})</span>
+                      )}
+                      {' • '}
+                      {t.customer_email || 'Verified Account'}
                     </div>
                   </td>
                   <td>
@@ -251,7 +263,10 @@ export default function TicketManagementView({
                   <td>{getStatusBadge(t.status)}</td>
                   <td className="cs-sla-cell">{getSlaPill(t)}</td>
                   <td>
-                    <span className="cs-tkt-team">{t.team_name || 'Support Pool'}</span>
+                    <span className="cs-tkt-team">{t.team_name || 'Unassigned'}</span>
+                  </td>
+                  <td>
+                    <span className="cs-tkt-agent">{t.assigned_agent_name || 'Unassigned'}</span>
                   </td>
                   <td className="cs-tkt-date-cell">
                     {t.created_at
@@ -310,11 +325,18 @@ export default function TicketManagementView({
                 </div>
                 <div className="cs-tkt-meta-item">
                   <span className="cs-meta-label">Team:</span>
-                  <span className="cs-meta-val">{t.team_name || 'Support Team'}</span>
+                  <span className="cs-meta-val">{t.team_name || 'Unassigned'}</span>
+                </div>
+                <div className="cs-tkt-meta-item">
+                  <span className="cs-meta-label">Agent:</span>
+                  <span className="cs-meta-val">{t.assigned_agent_name || 'Unassigned'}</span>
                 </div>
                 <div className="cs-tkt-meta-item">
                   <span className="cs-meta-label">Customer:</span>
-                  <span className="cs-meta-val">{t.customer_name || 'Customer'}</span>
+                  <span className="cs-meta-val">
+                    {t.customer_name || 'Customer'}
+                    {t.customer_role ? ` (${formatRole(t.customer_role)})` : ''}
+                  </span>
                 </div>
               </div>
 

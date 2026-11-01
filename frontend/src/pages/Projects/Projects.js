@@ -14,7 +14,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   assignProjectManager, assignTeamLead, createProject, deleteProject, listEmployees,
-  listProjects, updateProject, updateProjectStatus,
+  listProjectMembers, listProjects, updateProject, updateProjectStatus,
 } from '../../api/employeeApi';
 import Avatar from '../../components/common/Avatar';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
@@ -89,7 +89,28 @@ export default function Projects() {
   const [editForm, setEditForm] = useState(null);
   const [managerPick, setManagerPick] = useState('');
   const [leadPick, setLeadPick] = useState('');
+  const [projectMembers, setProjectMembers] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [memberError, setMemberError] = useState('');
   const { toast, showToast, dismissToast } = useToast();
+
+  const loadMembers = useCallback(async (projectId) => {
+    if (!projectId) {
+      setProjectMembers([]);
+      setMemberError('');
+      return;
+    }
+    setLoadingMembers(true);
+    setMemberError('');
+    try {
+      const data = await listProjectMembers(projectId);
+      setProjectMembers(Array.isArray(data) ? data : []);
+    } catch (err) {
+      setMemberError(apiErrorText(err, 'Could not load project team members.'));
+    } finally {
+      setLoadingMembers(false);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -117,7 +138,13 @@ export default function Projects() {
     setEditForm(null);
     setManagerPick('');
     setLeadPick('');
-  }, [selectedId]);
+    if (selectedId) {
+      loadMembers(selectedId);
+    } else {
+      setProjectMembers([]);
+      setMemberError('');
+    }
+  }, [selectedId, loadMembers]);
 
   const counts = useMemo(() => {
     const c = { all: projects.length };
@@ -144,6 +171,21 @@ export default function Projects() {
     ? employees.filter((emp) => emp.project?.id === selected.id)
     : []), [employees, selected]);
 
+  const eligibleLeads = useMemo(() => {
+    if (projectMembers.length > 0) {
+      return projectMembers.map((m) => ({
+        id: m.id,
+        name: m.full_name,
+        jobTitle: m.job_title,
+      }));
+    }
+    return members.map((emp) => ({
+      id: emp.id,
+      name: emp.user?.full_name || 'Member',
+      jobTitle: emp.job_title,
+    }));
+  }, [projectMembers, members]);
+
   async function run(action, successText) {
     setBusy(true);
     setError('');
@@ -152,6 +194,9 @@ export default function Projects() {
       await action();
       // Refresh first so the confirmation never sits next to stale data.
       await load();
+      if (selectedId) {
+        await loadMembers(selectedId);
+      }
       if (successText) {
         setNotice(successText);
         showToast(successText, 'success');
@@ -515,10 +560,40 @@ export default function Projects() {
               )}
 
               <div className="project-detail-section">
-                <h3 className="section-subheading">People</h3>
-                <div className="project-people">
-                  <div><span className="dmeta-label">Manager</span>{selected.manager ? selected.manager.full_name : 'Not assigned'}</div>
-                  <div><span className="dmeta-label">Team lead</span>{selected.team_lead ? selected.team_lead.user.full_name : 'Not assigned'}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                  <h3 className="section-subheading" style={{ margin: 0 }}>👥 Team Members</h3>
+                  <span className="badge purple" aria-label="Member count badge">
+                    {selected.member_count ?? projectMembers.length} {(selected.member_count ?? projectMembers.length) === 1 ? 'member' : 'members'}
+                  </span>
+                </div>
+
+                {/* Leadership: Manager and Team Lead */}
+                <div className="project-leadership-cards" aria-label="Project Leadership">
+                  <div className="project-leadership-card">
+                    <Avatar
+                      name={selected.manager ? selected.manager.full_name : 'Not assigned'}
+                      email={selected.manager ? selected.manager.email : null}
+                      size={36}
+                    />
+                    <div className="leadership-info">
+                      <strong>{selected.manager ? selected.manager.full_name : 'No Manager Assigned'}</strong>
+                      <span className="muted-note">{selected.manager ? selected.manager.email : 'Project Manager not designated'}</span>
+                    </div>
+                    <span className="badge blue">Manager</span>
+                  </div>
+
+                  <div className="project-leadership-card">
+                    <Avatar
+                      name={selected.team_lead ? selected.team_lead.user.full_name : 'Not assigned'}
+                      email={selected.team_lead ? selected.team_lead.user.email : null}
+                      size={36}
+                    />
+                    <div className="leadership-info">
+                      <strong>{selected.team_lead ? selected.team_lead.user.full_name : 'No Team Lead Assigned'}</strong>
+                      <span className="muted-note">{selected.team_lead ? selected.team_lead.user.email : 'Team Lead not designated'}</span>
+                    </div>
+                    <span className="badge green">Team Lead</span>
+                  </div>
                 </div>
 
                 {isProjectAdmin && (
@@ -546,9 +621,9 @@ export default function Projects() {
                         value={leadPick}
                         onChange={(e) => setLeadPick(e.target.value)}
                       >
-                        <option value="">{members.length ? 'Set team lead…' : 'No members on this project'}</option>
-                        {members.map((emp) => (
-                          <option key={emp.id} value={emp.id}>{emp.user.full_name}</option>
+                        <option value="">{eligibleLeads.length ? 'Set team lead…' : 'No members on this project'}</option>
+                        {eligibleLeads.map((m) => (
+                          <option key={m.id} value={m.id}>{m.name} ({m.jobTitle})</option>
                         ))}
                       </select>
                       <button type="button" className="btn-secondary" disabled={!leadPick || busy} onClick={handleAssignLead}>
@@ -558,23 +633,51 @@ export default function Projects() {
                   </div>
                 )}
 
-                {canSeeDirectory ? (
-                  <ul className="project-members" aria-label="Project members">
-                    {members.length === 0 && <li className="muted-note">No members assigned yet.</li>}
-                    {members.map((emp) => (
-                      <li key={emp.id}>
-                        <Avatar name={emp.user.full_name} email={emp.user.email} size={30} />
+                {loadingMembers ? (
+                  <div style={{ padding: '1rem', textAlign: 'center' }}>
+                    <LoadingSpinner />
+                    <span className="muted-note" style={{ marginLeft: '0.5rem' }}>Loading project team…</span>
+                  </div>
+                ) : memberError ? (
+                  <div className="alert error" role="alert">
+                    {memberError}
+                    <button
+                      type="button"
+                      className="btn-link"
+                      onClick={() => loadMembers(selected.id)}
+                      style={{ marginLeft: '0.5rem' }}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : projectMembers.length === 0 ? (
+                  <p className="muted-note">No employees are currently staffed on this project.</p>
+                ) : (
+                  <ul className="project-members" aria-label="Project team members">
+                    {projectMembers.map((emp) => (
+                      <li key={emp.id} className="project-member-item">
+                        <Avatar name={emp.full_name} email={emp.email} size={36} />
                         <div className="project-member-text">
-                          <strong>{emp.user.full_name}</strong>
-                          <span className="muted-note">{emp.job_title}</span>
+                          <div className="project-member-name-row">
+                            <strong>{emp.full_name}</strong>
+                            <span className={`badge ${emp.team_role === 'Team Lead' ? 'green' : 'gray'}`}>
+                              {emp.team_role}
+                            </span>
+                          </div>
+                          <span className="member-designation">
+                            {emp.job_title}
+                            {emp.department_name ? ` • ${emp.department_name}` : ''}
+                          </span>
+                          <span className="member-email">{emp.email}</span>
                         </div>
-                        {selected.team_lead?.id === emp.id && <span className="badge green">Lead</span>}
                       </li>
                     ))}
                   </ul>
-                ) : (
-                  <p className="muted-note">{selected.member_count} member{selected.member_count === 1 ? '' : 's'} on this project.</p>
                 )}
+
+                <div className="project-members-footer muted-note">
+                  {selected.member_count ?? projectMembers.length} {(selected.member_count ?? projectMembers.length) === 1 ? 'member' : 'members'} on this project.
+                </div>
               </div>
 
               {isProjectAdmin && (

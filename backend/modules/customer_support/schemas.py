@@ -52,6 +52,16 @@ class SupportTeamResponse(SupportTeamBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SupportAgentResponse(BaseModel):
+    id: int
+    full_name: str
+    email: str
+    role: str
+    is_active: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 # =============================================================================
 # 2. SUPPORT CATEGORY SCHEMAS
 # =============================================================================
@@ -384,6 +394,7 @@ class TicketListItem(BaseModel):
     team_name: Optional[str] = None
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None
+    customer_role: Optional[str] = None
     assigned_agent_name: Optional[str] = None
     sla_status: Optional[str] = "on_track"
     sla_time_remaining: Optional[str] = None
@@ -402,6 +413,9 @@ class TicketResponse(BaseModel):
     assigned_to: Optional[int] = None
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None
+    customer_role: Optional[str] = None
+    team_name: Optional[str] = None
+    assigned_agent_name: Optional[str] = None
     subject: str
     description: str
     priority: TicketPriority
@@ -451,6 +465,10 @@ class TicketMessageResponse(BaseModel):
 class TicketDetailResponse(TicketResponse):
     category: Optional[SupportCategoryResponse] = None
     team: Optional[SupportTeamResponse] = None
+    agent: Optional[SupportAgentResponse] = None
+    customer_role: Optional[str] = None
+    team_name: Optional[str] = None
+    assigned_agent_name: Optional[str] = None
     messages: List[TicketMessageResponse] = []
     chat_transcript: Optional[List[ChatMessageResponse]] = None
 

@@ -56,6 +56,11 @@ export async function listTeams() {
   return res.data;
 }
 
+export async function listSupportAgents() {
+  const res = await axiosInstance.get('/api/v1/customer-support/agents');
+  return res.data;
+}
+
 // ── 3. AI Chat Sessions & Grounded Chatbot ────────────────────────────
 
 export async function createChatSession(payload = {}) {

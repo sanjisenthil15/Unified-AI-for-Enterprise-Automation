@@ -9,17 +9,35 @@
 
 import React, { useState } from 'react';
 
+function currentUser() {
+  try {
+    return JSON.parse(localStorage.getItem('user')) || null;
+  } catch {
+    return null;
+  }
+}
+
 export default function CreateTicketModal({
   initialData = {},
   categories = [],
   onClose,
   onSubmit,
 }) {
+  const me = currentUser();
+  const defaultName = me?.full_name || 'Enterprise Customer';
+  const defaultEmail = me?.email || 'customer@enterprise.ai';
+
+  // Safely resolve category: if initialData.category_id matches a category id, use it;
+  // otherwise fallback to first available category from the database
+  const validInitialCatId = categories.some((c) => String(c.id) === String(initialData.category_id))
+    ? initialData.category_id
+    : (categories[0]?.id || '');
+
   const [subject, setSubject] = useState(initialData.subject || '');
-  const [categoryId, setCategoryId] = useState(initialData.category_id || (categories[0]?.id || ''));
+  const [categoryId, setCategoryId] = useState(validInitialCatId);
   const [priority, setPriority] = useState(initialData.priority || 'medium');
-  const [customerName, setCustomerName] = useState(initialData.customer_name || 'Enterprise Customer');
-  const [customerEmail, setCustomerEmail] = useState(initialData.customer_email || 'customer@enterprise.ai');
+  const [customerName, setCustomerName] = useState(initialData.customer_name || defaultName);
+  const [customerEmail, setCustomerEmail] = useState(initialData.customer_email || defaultEmail);
   const [description, setDescription] = useState(initialData.description || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');

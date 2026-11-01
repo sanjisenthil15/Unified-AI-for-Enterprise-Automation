@@ -149,6 +149,10 @@ AUDITED_MODELS: dict[str, tuple[str, tuple[str, ...]]] = {
     "Escalation": ("escalation", (
         "rule", "entity_type", "entity_id", "status", "recipient_count", "resolved_at",
     )),
+    "Incident": ("incident", (
+        "reported_by", "assigned_to", "severity", "status", "affected_system",
+        "root_cause", "resolved_at",
+    )),
 }
 
 _LABELS_KEY = "audit_action_labels"

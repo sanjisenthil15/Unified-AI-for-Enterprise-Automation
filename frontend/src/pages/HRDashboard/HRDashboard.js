@@ -18,6 +18,7 @@ import {
   bulkUploadResumes, listResumes, getResume,
   updateResume, deleteResume,
   analyzeResumes, getRecruitmentStats,
+  getTopCandidates, sendInterviewInvite,
 } from '../../api/recruitmentApi';
 import JOB_ROLE_TEMPLATES from '../../data/jobRoleTemplates';
 import '../Recruitment/Recruitment.css';
@@ -100,6 +101,22 @@ export default function HRDashboard() {
   const [editEmail,   setEditEmail]   = useState('');
   const [editSaving,  setEditSaving]  = useState(false);
   const [editMsg,     setEditMsg]     = useState(null);
+
+  // ── Top-N ranking & Interview modal states ────────────────────────
+  const [rankingN,        setRankingN]        = useState('5');
+  const [topCandidates,   setTopCandidates]   = useState([]);
+  const [rankingLoading,  setRankingLoading]  = useState(false);
+
+  const [inviteCandidate, setInviteCandidate] = useState(null);
+  const [inviteRecipient, setInviteRecipient] = useState('');
+  const [inviteDate,      setInviteDate]      = useState('');
+  const [inviteTime,      setInviteTime]      = useState('14:00 IST');
+  const [inviteMode,      setInviteMode]      = useState('Virtual / Google Meet (meet.google.com)');
+  const [inviteSubject,   setInviteSubject]   = useState('');
+  const [inviteBody,      setInviteBody]      = useState('');
+  const [inviteLoading,   setInviteLoading]   = useState(false);
+  const [inviteMsg,       setInviteMsg]       = useState(null);
+  const [bodyEdited,      setBodyEdited]      = useState(false);
 
   // ── init ─────────────────────────────────────────────────────────
   const refreshStats = useCallback(() => {
@@ -255,17 +272,148 @@ export default function HRDashboard() {
 
   // ── candidate table ───────────────────────────────────────────────
 
-  async function loadResults(jobId) {
+  async function loadTopCandidates(jobId, n = rankingN) {
+    if (!jobId) return;
+    setRankingLoading(true);
+    try {
+      const topNVal = n === 'all' ? 100 : Math.max(1, parseInt(n, 10) || 5);
+      const topList = await getTopCandidates(Number(jobId), topNVal);
+      setTopCandidates(Array.isArray(topList) ? topList : []);
+    } catch (err) {
+      console.warn('Could not load top candidates', err);
+      setTopCandidates([]);
+    } finally {
+      setRankingLoading(false);
+    }
+  }
+
+  async function loadResults(jobId, n = rankingN) {
     if (!jobId) return;
     setLoadingList(true);
     try {
-      const data = await listResumes(Number(jobId));
-      setResumes(data);
+      const topNVal = n === 'all' ? 100 : Math.max(1, parseInt(n, 10) || 5);
+      const [resumesData, topData] = await Promise.all([
+        listResumes(Number(jobId)).catch(() => []),
+        getTopCandidates(Number(jobId), topNVal).catch(() => []),
+      ]);
+      setResumes(resumesData);
+      setTopCandidates(topData);
       setResultsJobId(String(jobId));
     } catch {
       setResumes([]);
+      setTopCandidates([]);
     } finally {
       setLoadingList(false);
+    }
+  }
+
+  function handleTopNChange(n) {
+    setRankingN(n);
+    if (resultsJobId) {
+      loadTopCandidates(resultsJobId, n);
+    }
+  }
+
+  function buildDefaultTemplate(candidateName, jobTitle, date, time, mode) {
+    return `Dear ${candidateName},
+
+Thank you for your application for the ${jobTitle} position at EnterpriseAI.
+
+Following our screening and resume evaluation, we are pleased to invite you for an interview.
+
+Interview Details:
+• Organization: EnterpriseAI
+• Position: ${jobTitle}
+• Date: ${date || '[Date]'}
+• Time: ${time || '[Time]'}
+• Mode / Location: ${mode || '[Mode / Location]'}
+
+Please reply to this email to confirm if this schedule works for you, or let us know if you need to reschedule.
+
+Best regards,
+EnterpriseAI Recruitment Team
+recruitment@enterprise.ai`;
+  }
+
+  function openInterviewModal(cand) {
+    const job = jobs.find(j => j.id === Number(resultsJobId)) || {};
+    const jobTitle = job.title || 'Open Position';
+    const cName = cand.candidate_name || 'Candidate';
+    const cEmail = cand.candidate_email || '';
+
+    // Next business day
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() === 0) d.setDate(d.getDate() + 1);
+    if (d.getDay() === 6) d.setDate(d.getDate() + 2);
+    const dateStr = d.toISOString().split('T')[0];
+    const timeStr = '14:00 IST';
+    const modeStr = 'Virtual / Google Meet (meet.google.com)';
+
+    const subjectStr = `Interview Invitation: ${jobTitle} at EnterpriseAI - ${cName}`;
+    const bodyStr = buildDefaultTemplate(cName, jobTitle, dateStr, timeStr, modeStr);
+
+    setInviteCandidate(cand);
+    setInviteRecipient(cEmail);
+    setInviteDate(dateStr);
+    setInviteTime(timeStr);
+    setInviteMode(modeStr);
+    setInviteSubject(subjectStr);
+    setInviteBody(bodyStr);
+    setBodyEdited(false);
+    setInviteMsg(null);
+  }
+
+  async function handleSendInterview(e) {
+    e.preventDefault();
+    if (!inviteRecipient.trim() || !inviteRecipient.includes('@')) {
+      setInviteMsg({ type: 'error', text: 'Please enter a valid candidate email address.' });
+      return;
+    }
+    if (!inviteDate.trim()) {
+      setInviteMsg({ type: 'error', text: 'Please specify an interview date.' });
+      return;
+    }
+    if (!inviteTime.trim()) {
+      setInviteMsg({ type: 'error', text: 'Please specify an interview time.' });
+      return;
+    }
+    if (!inviteMode.trim()) {
+      setInviteMsg({ type: 'error', text: 'Please specify an interview mode / location.' });
+      return;
+    }
+
+    setInviteLoading(true);
+    setInviteMsg(null);
+    try {
+      const resumeId = inviteCandidate.resume_id || inviteCandidate.id;
+      const job = jobs.find(j => j.id === Number(resultsJobId)) || {};
+      const res = await sendInterviewInvite(resumeId, {
+        recipient_email: inviteRecipient.trim(),
+        candidate_name: inviteCandidate.candidate_name,
+        job_position: job.title || 'Open Position',
+        interview_date: inviteDate.trim(),
+        interview_time: inviteTime.trim(),
+        interview_mode: inviteMode.trim(),
+        email_subject: inviteSubject.trim(),
+        email_body: inviteBody.trim(),
+      });
+
+      setAnalyzeMsg({
+        type: 'success',
+        text: `✅ ${res.message}`,
+      });
+      setInviteCandidate(null);
+      // Refresh top candidates and general list
+      await loadResults(resultsJobId, rankingN);
+      refreshStats();
+    } catch (err) {
+      setInviteMsg({
+        type: 'error',
+        text: err.response?.data?.detail || 'Failed to send interview invitation.',
+      });
+    } finally {
+      setInviteLoading(false);
     }
   }
 
@@ -280,6 +428,7 @@ export default function HRDashboard() {
         type: 'success',
         text: `Analysis complete — ${data.analysed} resume(s) analyzed.`,
       });
+      await loadTopCandidates(resultsJobId, rankingN);
       refreshStats();
     } catch (err) {
       setAnalyzeMsg({ type: 'error', text: err.response?.data?.detail || 'AI analysis failed.' });
@@ -641,7 +790,163 @@ export default function HRDashboard() {
           </div>
         )}
 
-        {displayedResumes.length > 0 ? (
+        {/* Top-N Candidate Ranking Controls */}
+        {resultsJobId && (
+          <div className="top-n-bar">
+            <span className="top-n-label">🎯 Top-N Candidate Ranking:</span>
+            {['5', '10', '15', '20'].map((n) => (
+              <button
+                key={n}
+                type="button"
+                className={`top-n-btn ${rankingN === n ? 'active' : ''}`}
+                onClick={() => handleTopNChange(n)}
+              >
+                Top {n}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`top-n-btn ${rankingN === 'all' ? 'active' : ''}`}
+              onClick={() => handleTopNChange('all')}
+            >
+              All
+            </button>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', marginLeft: '0.5rem' }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Custom N:</span>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                className="top-n-input"
+                aria-label="Custom Top N"
+                value={['5', '10', '15', '20', 'all'].includes(rankingN) ? '' : rankingN}
+                placeholder="e.g. 7"
+                onChange={(e) => {
+                  const val = e.target.value.replace(/[^0-9]/g, '');
+                  if (val) handleTopNChange(val);
+                }}
+              />
+            </div>
+            {rankingLoading && <span className="muted-note" style={{ marginLeft: '0.5rem' }}>Loading ranking…</span>}
+            <span className="muted-note" style={{ marginLeft: 'auto', fontSize: '0.8rem' }}>
+              Showing {topCandidates.length > 0 ? topCandidates.length : displayedResumes.length} candidate{ (topCandidates.length > 0 ? topCandidates.length : displayedResumes.length) === 1 ? '' : 's'} (Ranked by AI score)
+            </span>
+          </div>
+        )}
+
+        {topCandidates.length > 0 ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="data-table" aria-label="Candidate results">
+              <thead>
+                <tr>
+                  <th style={{ width: 60 }}>Rank</th>
+                  <th>Candidate</th>
+                  <th>Email</th>
+                  <th>Resume / OCR</th>
+                  <th>AI Score</th>
+                  <th>Relevant Skills</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topCandidates.map((c) => {
+                  const rankClass = c.rank === 1 ? 'gold' : c.rank === 2 ? 'silver' : c.rank === 3 ? 'bronze' : 'standard';
+                  return (
+                    <tr key={c.resume_id} className={!c.meets_criteria ? 'row-below-criteria' : ''}>
+                      <td>
+                        <span className={`rank-badge ${rankClass}`} title={`Rank #${c.rank}`}>
+                          #{c.rank}
+                        </span>
+                      </td>
+                      <td>
+                        <strong>{c.candidate_name}</strong>
+                        {!c.meets_criteria && (
+                          <div style={{ fontSize: '0.72rem', color: '#dc2626', marginTop: '0.15rem' }}>
+                            ⚠ Below criteria
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                        {c.candidate_email ? (
+                          c.candidate_email
+                        ) : (
+                          <span style={{ color: '#d97706', fontSize: '0.78rem' }}>⚠ Email missing</span>
+                        )}
+                      </td>
+                      <td>
+                        <span className={`badge ${c.ocr_status === 'extracted' || c.ocr_status === 'analysed' ? 'green' : c.ocr_status === 'error' ? 'red' : 'blue'}`}>
+                          {c.ocr_status === 'analysed' ? '✓ Analyzed' : c.ocr_status === 'extracted' ? '✓ Extracted' : c.ocr_status === 'error' ? '❌ Error' : 'Uploaded'}
+                        </span>
+                      </td>
+                      <td>
+                        {c.ai_score != null ? (
+                          <strong style={{ color: c.ai_score >= 80 ? '#15803d' : c.ai_score >= 50 ? '#b45309' : '#b91c1c' }}>
+                            {Math.round(c.ai_score)}%
+                          </strong>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>—</span>
+                        )}
+                      </td>
+                      <td>
+                        {c.matched_skills ? (
+                          <div className="skill-chips">
+                            {c.matched_skills.split(/[,•;]/).slice(0, 3).map((s, idx) => {
+                              const clean = s.trim();
+                              return clean ? <span key={idx} className="skill-chip">{clean}</span> : null;
+                            })}
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>—</span>
+                        )}
+                      </td>
+                      <td>
+                        <span className={`badge ${
+                          c.application_status === 'Interview Scheduled' ? 'purple' :
+                          c.application_status === 'Shortlisted' ? 'green' :
+                          c.application_status === 'Under Review' ? 'amber' :
+                          c.application_status === 'Rejected' ? 'red' : 'blue'
+                        }`}>
+                          {c.application_status}
+                        </span>
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {c.interview_invited ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', marginRight: '0.6rem' }}>
+                            <span className="badge purple" style={{ fontSize: '0.76rem', marginRight: '0.35rem' }}>✓ Invited</span>
+                            <button
+                              type="button"
+                              className="btn-link"
+                              style={{ fontSize: '0.8rem' }}
+                              onClick={() => openInterviewModal(c)}
+                            >
+                              ✉️ Resend
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ padding: '0.3rem 0.65rem', fontSize: '0.8rem', marginRight: '0.6rem' }}
+                            onClick={() => openInterviewModal(c)}
+                          >
+                            ✉️ Accept for Interview
+                          </button>
+                        )}
+                        <button className="btn-link" style={{ marginRight: '0.6rem' }}
+                          onClick={() => openDetail({ id: c.resume_id, ...c })}>View</button>
+                        <button className="btn-link" style={{ marginRight: '0.6rem' }}
+                          onClick={() => openEditResume({ id: c.resume_id, ...c })}>Edit</button>
+                        <button className="btn-link danger"
+                          onClick={() => handleDeleteResume({ id: c.resume_id, ...c })}>Delete</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : displayedResumes.length > 0 ? (
           <div style={{ overflowX: 'auto' }}>
             <table className="data-table" aria-label="Candidate results">
               <thead>
@@ -686,6 +991,14 @@ export default function HRDashboard() {
                           : <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>—</span>}
                       </td>
                       <td style={{ whiteSpace: 'nowrap' }}>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          style={{ padding: '0.3rem 0.65rem', fontSize: '0.8rem', marginRight: '0.6rem' }}
+                          onClick={() => openInterviewModal(r)}
+                        >
+                          ✉️ Accept for Interview
+                        </button>
                         <button className="btn-link" style={{ marginRight: '0.6rem' }}
                           onClick={() => openDetail(r)}>View</button>
                         <button className="btn-link" style={{ marginRight: '0.6rem' }}
@@ -799,8 +1112,15 @@ export default function HRDashboard() {
                       </div>}
                 </div>
 
-                {/* Edit shortcut */}
-                <div style={{ marginTop: '1rem' }}>
+                {/* Actions shortcut in detail panel */}
+                <div style={{ marginTop: '1rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => { setDetailResume(null); openInterviewModal(r); }}
+                  >
+                    ✉️ Accept for Interview
+                  </button>
                   <button className="btn-secondary" onClick={() => { setDetailResume(null); openEditResume(r); }}>
                     ✏️ Edit Candidate Info
                   </button>
@@ -840,6 +1160,160 @@ export default function HRDashboard() {
                 </button>
                 <button type="button" className="btn-secondary" onClick={() => setEditResume(null)}>
                   Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Interview Invitation Modal ───────────────────────────── */}
+      {inviteCandidate && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Interview Invitation">
+          <div className="interview-modal-box">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>
+                ✉️ Accept & Invite for Interview
+              </h3>
+              <button className="btn-link" onClick={() => setInviteCandidate(null)}>✕</button>
+            </div>
+
+            {inviteCandidate.interview_invited && (
+              <div className="alert amber" style={{ marginBottom: '1rem' }}>
+                ⚠️ <strong>Notice:</strong> An interview invitation has already been recorded for this candidate.
+                Sending another will deliver an updated invitation or follow-up schedule.
+              </div>
+            )}
+
+            {inviteMsg && <div className={`alert ${inviteMsg.type}`}>{inviteMsg.text}</div>}
+
+            <form onSubmit={handleSendInterview}>
+              <div className="form-grid" style={{ marginBottom: '1rem' }}>
+                <div className="field-group">
+                  <label>Candidate Name</label>
+                  <input className="field-input" value={inviteCandidate.candidate_name} disabled />
+                </div>
+                <div className="field-group">
+                  <label>Candidate Email *</label>
+                  <input
+                    className="field-input"
+                    type="email"
+                    value={inviteRecipient}
+                    onChange={(e) => setInviteRecipient(e.target.value)}
+                    required
+                    placeholder="candidate@example.com"
+                  />
+                </div>
+                <div className="field-group">
+                  <label>Job Position</label>
+                  <input
+                    className="field-input"
+                    value={jobs.find((j) => j.id === Number(resultsJobId))?.title || 'Open Position'}
+                    disabled
+                  />
+                </div>
+                <div className="field-group">
+                  <label>Interview Date *</label>
+                  <input
+                    className="field-input"
+                    type="date"
+                    value={inviteDate}
+                    onChange={(e) => {
+                      const newDate = e.target.value;
+                      setInviteDate(newDate);
+                      if (!bodyEdited) {
+                        const jTitle = jobs.find((j) => j.id === Number(resultsJobId))?.title || 'Open Position';
+                        setInviteBody(buildDefaultTemplate(inviteCandidate.candidate_name, jTitle, newDate, inviteTime, inviteMode));
+                      }
+                    }}
+                    required
+                  />
+                </div>
+                <div className="field-group">
+                  <label>Interview Time *</label>
+                  <input
+                    className="field-input"
+                    value={inviteTime}
+                    onChange={(e) => {
+                      const newTime = e.target.value;
+                      setInviteTime(newTime);
+                      if (!bodyEdited) {
+                        const jTitle = jobs.find((j) => j.id === Number(resultsJobId))?.title || 'Open Position';
+                        setInviteBody(buildDefaultTemplate(inviteCandidate.candidate_name, jTitle, inviteDate, newTime, inviteMode));
+                      }
+                    }}
+                    placeholder="e.g. 14:00 IST / 2:00 PM"
+                    required
+                  />
+                </div>
+                <div className="field-group">
+                  <label>Interview Mode / Location *</label>
+                  <select
+                    className="field-select"
+                    value={inviteMode}
+                    onChange={(e) => {
+                      const newMode = e.target.value;
+                      setInviteMode(newMode);
+                      if (!bodyEdited) {
+                        const jTitle = jobs.find((j) => j.id === Number(resultsJobId))?.title || 'Open Position';
+                        setInviteBody(buildDefaultTemplate(inviteCandidate.candidate_name, jTitle, inviteDate, inviteTime, newMode));
+                      }
+                    }}
+                  >
+                    <option value="Virtual / Google Meet (meet.google.com)">Virtual / Google Meet</option>
+                    <option value="Virtual / Microsoft Teams">Virtual / Microsoft Teams</option>
+                    <option value="Virtual / Zoom Video Call">Virtual / Zoom Video Call</option>
+                    <option value="In-person (EnterpriseAI Campus - Conference Room 3B)">In-Person (HQ Office)</option>
+                    <option value="Phone Interview">Phone Interview</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="field-group" style={{ marginBottom: '1rem' }}>
+                <label>Email Subject *</label>
+                <input
+                  className="field-input"
+                  value={inviteSubject}
+                  onChange={(e) => setInviteSubject(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="field-group" style={{ marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label>Email Body (Review & Customize) *</label>
+                  <button
+                    type="button"
+                    className="btn-link"
+                    onClick={() => {
+                      setBodyEdited(false);
+                      const jTitle = jobs.find((j) => j.id === Number(resultsJobId))?.title || 'Open Position';
+                      setInviteBody(buildDefaultTemplate(inviteCandidate.candidate_name, jTitle, inviteDate, inviteTime, inviteMode));
+                    }}
+                    style={{ fontSize: '0.78rem' }}
+                  >
+                    Reset to Default
+                  </button>
+                </div>
+                <textarea
+                  className="field-input"
+                  rows={8}
+                  value={inviteBody}
+                  onChange={(e) => {
+                    setInviteBody(e.target.value);
+                    setBodyEdited(true);
+                  }}
+                  style={{ fontFamily: 'monospace', fontSize: '0.86rem', resize: 'vertical' }}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                <button type="button" className="btn-secondary" onClick={() => setInviteCandidate(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn-primary" disabled={inviteLoading}>
+                  {inviteLoading ? 'Sending Invitation…' : '✉️ Send Interview Invitation'}
                 </button>
               </div>
             </form>

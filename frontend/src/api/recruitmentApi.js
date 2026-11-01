@@ -95,3 +95,18 @@ export async function getRecruitmentStats() {
   const res = await axiosInstance.get('/api/v1/recruitment/stats');
   return res.data;
 }
+
+
+// ── Top-N Ranking & Interview Invitation ─────────────────────────
+
+export async function getTopCandidates(jobId, topN = 5) {
+  const res = await axiosInstance.get(`/api/v1/recruitment/jobs/${jobId}/top-candidates`, {
+    params: { top_n: topN },
+  });
+  return res.data;
+}
+
+export async function sendInterviewInvite(resumeId, payload) {
+  const res = await axiosInstance.post(`/api/v1/recruitment/resumes/${resumeId}/interview-invite`, payload);
+  return res.data;
+}

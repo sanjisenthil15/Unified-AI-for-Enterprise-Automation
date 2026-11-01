@@ -25,6 +25,7 @@ import {
   getCustomerSupportStats,
   listKnowledgeDocuments,
   listCategories,
+  listSupportAgents,
   listTickets,
   getTicket,
   createTicket,
@@ -55,6 +56,14 @@ import NotificationsView from './components/NotificationsView';
 import CustomerContextDrawer from './components/CustomerContextDrawer';
 import SupportInsightsDrawer from './components/SupportInsightsDrawer';
 import SlaMonitoringDrawer from './components/SlaMonitoringDrawer';
+
+function currentUser() {
+  try {
+    return JSON.parse(localStorage.getItem('user')) || null;
+  } catch {
+    return null;
+  }
+}
 
 export default function CustomerSupport() {
   // Navigation tabs: 'chat' | 'tickets' | 'kb' | 'analytics' | 'status' | 'requests' | 'notifications'
@@ -88,6 +97,7 @@ export default function CustomerSupport() {
   // Knowledge Base & Categories state
   const [documents, setDocuments] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [agents, setAgents] = useState([]);
   const [isKbLoading, setIsKbLoading] = useState(false);
 
   // Slide-Over Drawers state
@@ -141,6 +151,15 @@ export default function CustomerSupport() {
     }
   }, []);
 
+  const loadAgents = useCallback(async () => {
+    try {
+      const agList = await listSupportAgents();
+      setAgents(agList || []);
+    } catch {
+      // Ignore if user lacks agent management role
+    }
+  }, []);
+
   const loadTicketsList = useCallback(async () => {
     setIsTicketsLoading(true);
     try {
@@ -189,8 +208,9 @@ export default function CustomerSupport() {
     loadHealthAndStats();
     loadKnowledgeAndCategories();
     loadTicketsList();
+    loadAgents();
     loadChatSessions();
-  }, [loadHealthAndStats, loadKnowledgeAndCategories, loadTicketsList, loadChatSessions]);
+  }, [loadHealthAndStats, loadKnowledgeAndCategories, loadTicketsList, loadAgents, loadChatSessions]);
 
   // Ticket filter state for analytics drill-down
   const [ticketStatusFilter, setTicketStatusFilter] = useState('ALL');
@@ -199,10 +219,13 @@ export default function CustomerSupport() {
 
   async function handleNewSession() {
     setIsChatLoading(true);
+    const me = currentUser();
+    const myName = me?.full_name || 'Enterprise Customer';
+    const myEmail = me?.email || 'customer@enterprise.ai';
     try {
       const newSess = await createChatSession({
-        customer_name: 'Enterprise Admin',
-        customer_email: 'admin@enterprise.ai',
+        customer_name: myName,
+        customer_email: myEmail,
       });
       setSessions((prev) => [newSess, ...prev]);
       setActiveSessionId(newSess.id);
@@ -212,8 +235,8 @@ export default function CustomerSupport() {
       const fallbackId = `session_${Date.now()}`;
       const fallbackSess = {
         id: fallbackId,
-        customer_name: 'Enterprise Admin',
-        customer_email: 'admin@enterprise.ai',
+        customer_name: myName,
+        customer_email: myEmail,
         title: 'New Support Conversation',
         status: 'active',
         message_count: 0,
@@ -634,6 +657,7 @@ export default function CustomerSupport() {
             tickets={tickets}
             isLoading={isTicketsLoading}
             categories={categories}
+            agents={agents}
             initialStatusFilter={ticketStatusFilter}
             onSelectTicket={handleOpenTicketDetail}
             onOpenCreateTicket={() => {
@@ -864,11 +888,13 @@ export default function CustomerSupport() {
       {selectedTicketId && selectedTicketDetail && (
         <TicketDetailModal
           ticket={selectedTicketDetail}
+          agents={agents}
           onClose={() => {
             setSelectedTicketId(null);
             setSelectedTicketDetail(null);
           }}
           onUpdateStatus={handleUpdateTicketStatus}
+          onUpdateTicket={handleUpdateTicketStatus}
           onAddMessage={handleAddTicketMessage}
         />
       )}

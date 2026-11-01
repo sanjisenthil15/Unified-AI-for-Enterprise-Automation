@@ -314,6 +314,56 @@ def get_project(
     return _with_member_count(db, project)
 
 
+def list_project_members(
+    db: Session,
+    project_id: int,
+    current_user: User | None = None,
+    current_employee: Employee | None = None,
+):
+    from modules.employee_management.schemas import ProjectMemberResponse
+
+    project = _project_query(db).filter(Project.id == project_id).first()
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Project id={project_id} not found.")
+    if current_user is not None:
+        assert_can_view_project(db, project, current_user, current_employee)
+
+    emps = (
+        db.query(Employee)
+        .options(
+            joinedload(Employee.user).joinedload(User.role),
+            joinedload(Employee.department),
+        )
+        .filter(Employee.project_id == project_id, Employee.deleted_at.is_(None))
+        .all()
+    )
+
+    members: list[ProjectMemberResponse] = []
+    for emp in emps:
+        is_lead = project.team_lead_id == emp.id
+        team_role = "Team Lead" if is_lead else "Member"
+        user_role = getattr(getattr(emp.user, "role", None), "name", "employee")
+        members.append(
+            ProjectMemberResponse(
+                id=emp.id,
+                user_id=emp.user.id,
+                full_name=emp.user.full_name,
+                email=emp.user.email,
+                job_title=emp.job_title,
+                employee_code=emp.employee_code,
+                role=user_role,
+                team_role=team_role,
+                department_name=emp.department.name if emp.department else None,
+                status=emp.status,
+                photo_url=None,
+            )
+        )
+
+    # Sort team lead to top, then alphabetical by name
+    members.sort(key=lambda m: (0 if m.team_role == "Team Lead" else 1, m.full_name.lower()))
+    return members
+
+
 def create_project(db: Session, payload, current_employee=None) -> Project:
     existing = db.query(Project).filter(Project.name == payload.name).first()
     if existing is not None:

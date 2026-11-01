@@ -8,13 +8,24 @@ import axiosInstance from './axiosInstance';
 
 const BASE = '/api/v1/incidents';
 
-// ── Statistics ────────────────────────────────────────────────────
+// ── Statistics ─────────────────────────────────────────────────────────────
 export async function getIncidentStats() {
   const res = await axiosInstance.get(`${BASE}/statistics`);
   return res.data;
 }
 
-// ── List / Get ────────────────────────────────────────────────────
+// ── Teams & Members for AI Assignment ──────────────────────────────────────
+export async function listIncidentTeams() {
+  const res = await axiosInstance.get(`${BASE}/teams`);
+  return res.data;
+}
+
+export async function listTeamMembers(teamId) {
+  const res = await axiosInstance.get(`${BASE}/teams/${teamId}/members`);
+  return res.data;
+}
+
+// ── List / Get ─────────────────────────────────────────────────────────────
 export async function listIncidents(params = {}) {
   const res = await axiosInstance.get(BASE, { params });
   return res.data;
@@ -25,7 +36,7 @@ export async function getIncident(id) {
   return res.data;
 }
 
-// ── Create / Update / Delete ──────────────────────────────────────
+// ── Create / Update / Delete ───────────────────────────────────────────────
 export async function createIncident(payload) {
   const res = await axiosInstance.post(BASE, payload);
   return res.data;
@@ -40,17 +51,20 @@ export async function deleteIncident(id) {
   await axiosInstance.delete(`${BASE}/${id}`);
 }
 
-// ── Lifecycle ─────────────────────────────────────────────────────
+// ── Lifecycle ──────────────────────────────────────────────────────────────
 export async function updateIncidentStatus(id, status, notes = '') {
   const res = await axiosInstance.put(`${BASE}/${id}/status`, { status, notes });
   return res.data;
 }
 
-export async function assignIncident(id, assignedTo, notes = '') {
-  const res = await axiosInstance.put(`${BASE}/${id}/assign`, {
-    assigned_to: assignedTo,
-    notes,
-  });
+export async function assignIncident(id, assignedToOrPayload, notes = '') {
+  let body;
+  if (typeof assignedToOrPayload === 'object' && assignedToOrPayload !== null) {
+    body = assignedToOrPayload;
+  } else {
+    body = { assigned_to: assignedToOrPayload, notes };
+  }
+  const res = await axiosInstance.put(`${BASE}/${id}/assign`, body);
   return res.data;
 }
 
@@ -67,7 +81,7 @@ export async function closeIncident(id) {
   return res.data;
 }
 
-// ── AI Triage ─────────────────────────────────────────────────────
+// ── AI Triage ──────────────────────────────────────────────────────────────
 export async function runAITriage(id) {
   const res = await axiosInstance.post(`${BASE}/${id}/triage`);
   return res.data;
@@ -78,7 +92,7 @@ export async function getLatestTriage(id) {
   return res.data;
 }
 
-// ── Timeline ──────────────────────────────────────────────────────
+// ── Timeline ───────────────────────────────────────────────────────────────
 export async function getTimeline(id) {
   const res = await axiosInstance.get(`${BASE}/${id}/timeline`);
   return res.data;

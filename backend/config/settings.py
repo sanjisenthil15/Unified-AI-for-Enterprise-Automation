@@ -168,6 +168,15 @@ class Settings(BaseSettings):
     LEAVE_PENDING_ESCALATION_HOURS: int = 48
     ACTION_ITEM_REVIEW_ESCALATION_HOURS: int = 72
 
+    # SMTP / Email configuration for interview invitations & notifications
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = "recruitment@enterprise.ai"
+    SMTP_FROM_NAME: str = "EnterpriseAI HR Recruitment Team"
+    SMTP_USE_TLS: bool = True
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]

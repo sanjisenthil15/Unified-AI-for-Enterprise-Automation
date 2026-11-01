@@ -142,6 +142,22 @@ class ProjectManagerInfo(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ProjectMemberResponse(BaseModel):
+    id: int
+    user_id: int
+    full_name: str
+    email: str
+    job_title: str
+    employee_code: Optional[str] = None
+    role: str = "employee"
+    team_role: str = "Member"
+    department_name: Optional[str] = None
+    status: str = "active"
+    photo_url: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
 class ProjectResponse(BaseModel):
     id: int
     name: str

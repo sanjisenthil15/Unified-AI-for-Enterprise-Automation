@@ -17,8 +17,8 @@ Schemas:
 """
 
 from datetime import datetime
-from typing import List, Literal, Optional
-from pydantic import BaseModel, Field
+from typing import List, Literal, Optional, Union
+from pydantic import BaseModel, Field, field_validator
 
 
 # ------------------------------------------------------------------ #
@@ -37,8 +37,45 @@ class UserBrief(BaseModel):
     id:        int
     full_name: str
     email:     str
+    role:      Optional[str] = None
+    team_name: Optional[str] = None
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _extract_role(cls, v):
+        if hasattr(v, "name"):
+            return v.name
+        return str(v) if v is not None else None
 
     model_config = {"from_attributes": True}
+
+# ------------------------------------------------------------------ #
+# Team & Member schemas for AI assignment
+# ------------------------------------------------------------------ #
+
+class IncidentTeamMember(BaseModel):
+    user_id:     int
+    employee_id: int
+    full_name:   str
+    email:       str
+    job_title:   Optional[str] = None
+    role:        Optional[str] = None
+    status:      str = "active"
+
+    model_config = {"from_attributes": True}
+
+
+class IncidentTeamResponse(BaseModel):
+    id:           str
+    team_id:      int
+    team_type:    str
+    name:         str
+    description:  Optional[str] = None
+    member_count: int
+    members:      Optional[List[IncidentTeamMember]] = None
+
+    model_config = {"from_attributes": True}
+
 
 
 # ------------------------------------------------------------------ #
@@ -67,8 +104,11 @@ class IncidentStatusUpdate(BaseModel):
 
 
 class IncidentAssign(BaseModel):
-    assigned_to: int = Field(..., description="User ID to assign this incident to")
-    notes:       Optional[str] = None
+    assigned_to:         int                       = Field(..., description="User ID to assign this incident to")
+    team_id:             Optional[Union[str, int]] = Field(None, description="Selected team ID (project or department)")
+    team_name:           Optional[str]             = Field(None, description="Selected team name")
+    ai_recommended_team: Optional[str]             = Field(None, description="Original AI recommended team if any")
+    notes:               Optional[str]             = None
 
 
 class IncidentResolve(BaseModel):
@@ -92,6 +132,8 @@ class IncidentResponse(BaseModel):
     assigned_to:     Optional[int]
     reporter:        Optional[UserBrief]  = None
     assignee:        Optional[UserBrief]  = None
+    team_name:       Optional[str]        = None
+    ai_triage:       Optional["AITriageResponse"] = None
     resolved_at:     Optional[datetime]
     created_at:      datetime
     updated_at:      datetime
@@ -108,6 +150,8 @@ class IncidentListItem(BaseModel):
     affected_system: Optional[str]
     reported_by:     int
     assigned_to:     Optional[int]
+    team_name:       Optional[str]        = None
+    assignee_name:   Optional[str]        = None
     resolved_at:     Optional[datetime]
     created_at:      datetime
     updated_at:      datetime

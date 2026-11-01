@@ -87,15 +87,66 @@
 .project-transitions .transition-cancelled { color: var(--danger); border-color: var(--danger); }
 
 .project-people { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; font-size: 0.9rem; }
+.project-leadership-cards { display: flex; flex-direction: column; gap: 0.5rem; }
+.project-leadership-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--surface-subtle, rgba(124, 58, 237, 0.04));
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  padding: 0.6rem 0.8rem;
+}
+.project-leadership-card .leadership-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.project-leadership-card .leadership-info strong {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+.project-leadership-card .badge {
+  flex-shrink: 0;
+  text-transform: capitalize;
+}
+
 .project-assign { display: flex; flex-direction: column; gap: 0.5rem; }
 .project-assign .field-row { margin: 0; flex-wrap: wrap; }
 .project-assign .field-select { flex: 1 1 160px; min-width: 0; }
 
-.project-members { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; max-height: 280px; overflow-y: auto; }
-.project-members li { display: flex; align-items: center; gap: 0.6rem; }
+.project-members { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; max-height: 320px; overflow-y: auto; }
+.project-member-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  transition: background-color 0.12s ease;
+}
+.project-member-item:hover {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.02));
+}
 .project-members .avatar { flex-shrink: 0; }
-.project-member-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-.project-members li strong { font-size: 0.88rem; }
+.project-member-text { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 0.15rem; }
+.project-member-name-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.project-member-name-row strong { font-size: 0.88rem; color: var(--text-primary); }
+.project-member-name-row .badge { font-size: 0.72rem; padding: 0.15rem 0.45rem; }
+.member-designation { font-size: 0.78rem; color: var(--text-secondary); }
+.member-email { font-size: 0.74rem; color: var(--text-muted); }
+.project-members-footer {
+  font-size: 0.8rem;
+  padding-top: 0.25rem;
+  border-top: 1px dashed var(--border);
+}
 
 .project-danger { flex-direction: row; align-items: center; flex-wrap: wrap; }
 

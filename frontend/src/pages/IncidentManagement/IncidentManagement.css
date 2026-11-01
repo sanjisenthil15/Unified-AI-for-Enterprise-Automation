@@ -226,3 +226,86 @@
   .inc-action-bar { flex-direction: column; }
   .detail-ai-grid { grid-template-columns: 1fr !important; }
 }
+
+
+/* ── AI Recommendation Banner in Assign Modal ──────────────────────────────── */
+.inc-ai-rec-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  margin-bottom: 1.15rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  border: 1px solid transparent;
+}
+.inc-ai-rec-banner.rec-matched {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+  color: #4c1d95;
+}
+.inc-ai-rec-banner.rec-overridden {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+.inc-ai-rec-banner.rec-unmatched,
+.inc-ai-rec-banner.rec-none {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+.inc-ai-rec-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+.inc-ai-rec-content {
+  flex: 1;
+}
+.inc-ai-rec-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.25rem;
+}
+.inc-ai-rec-title {
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+.inc-ai-rec-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.inc-ai-rec-pill.matched {
+  background: #7c3aed;
+  color: #ffffff;
+}
+.inc-ai-rec-pill.override {
+  background: #d97706;
+  color: #ffffff;
+}
+.inc-ai-rec-pill.neutral {
+  background: #64748b;
+  color: #ffffff;
+}
+.inc-ai-rec-desc {
+  font-size: 0.82rem;
+  opacity: 0.9;
+}
+.inc-assign-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: #ede9fe;
+  color: #6d28d9;
+}

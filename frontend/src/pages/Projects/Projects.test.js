@@ -12,6 +12,7 @@ jest.mock('../../api/employeeApi', () => ({
   createProject: jest.fn(),
   deleteProject: jest.fn(),
   listEmployees: jest.fn(),
+  listProjectMembers: jest.fn(),
   listProjects: jest.fn(),
   updateProject: jest.fn(),
   updateProjectStatus: jest.fn(),
@@ -50,6 +51,19 @@ beforeEach(() => {
   localStorage.clear();
   employeeApi.listProjects.mockResolvedValue(PROJECTS);
   employeeApi.listEmployees.mockResolvedValue(EMPLOYEES);
+  employeeApi.listProjectMembers.mockResolvedValue([
+    {
+      id: 7,
+      user_id: 70,
+      full_name: 'Eve Engineer',
+      email: 'eve@x.io',
+      job_title: 'Backend Developer',
+      role: 'employee',
+      team_role: 'Member',
+      department_name: 'Engineering',
+      status: 'active',
+    },
+  ]);
   employeeApi.updateProjectStatus.mockResolvedValue({});
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -144,6 +158,9 @@ test('employee view is read-only and never calls the employee directory', async 
   await openCard('Apollo');
   expect(buttonByText('Edit details')).toBeFalsy();
   expect(buttons().some((b) => b.textContent.startsWith('Move to'))).toBe(false);
+  expect(employeeApi.listProjectMembers).toHaveBeenCalledWith(1);
+  expect(container.textContent).toContain('Eve Engineer');
+  expect(container.textContent).toContain('Backend Developer');
   expect(container.textContent).toContain('2 members on this project.');
 });
 

@@ -45,6 +45,8 @@ from modules.incident_management.schemas import (
     IncidentResponse,
     IncidentStats,
     IncidentStatusUpdate,
+    IncidentTeamMember,
+    IncidentTeamResponse,
     IncidentUpdate,
     TimelineEntryResponse,
 )
@@ -70,6 +72,36 @@ def incident_statistics(
     current_user: User    = Depends(get_current_user),
 ):
     return service.get_incident_stats(db)
+
+# ------------------------------------------------------------------ #
+# Teams & Members (for AI-assisted assignment)
+# ------------------------------------------------------------------ #
+
+@router.get(
+    "/teams",
+    response_model=List[IncidentTeamResponse],
+    summary="List available teams and active members for incident assignment",
+)
+def list_incident_teams(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return service.list_incident_teams(db)
+
+
+@router.get(
+    "/teams/{team_id}/members",
+    response_model=List[IncidentTeamMember],
+    summary="List active employees belonging to a specific team",
+)
+def list_incident_team_members(
+    team_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return service.list_team_members(db, team_id)
+
+
 
 
 # ------------------------------------------------------------------ #
@@ -206,7 +238,7 @@ def update_status(
 @router.put(
     "/{incident_id}/assign",
     response_model=IncidentResponse,
-    summary="Assign incident to a user (admin / manager)",
+    summary="Assign incident to a team and employee (admin / manager)",
 )
 def assign_incident(
     incident_id:  int,
@@ -215,8 +247,14 @@ def assign_incident(
     current_user: User    = Depends(require_roles(_ASSIGN_ROLES)),
 ):
     return service.assign_incident(
-        db, incident_id, payload.assigned_to,
-        actor_id=current_user.id, notes=payload.notes,
+        db=db,
+        incident_id=incident_id,
+        assigned_to_user_id=payload.assigned_to,
+        actor_id=current_user.id,
+        notes=payload.notes,
+        team_id=payload.team_id,
+        team_name=payload.team_name,
+        ai_recommended_team=payload.ai_recommended_team,
     )
 
 

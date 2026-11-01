@@ -20,7 +20,7 @@ Endpoints:
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
 from config.database import get_db
@@ -38,6 +38,9 @@ from modules.recruitment.schemas import (
     ResumeListItem,
     ResumeResponse,
     ResumeUpdate,
+    TopCandidateResponse,
+    InterviewInviteRequest,
+    InterviewInviteResponse,
 )
 from modules.recruitment import service
 
@@ -231,4 +234,43 @@ def analyze_resumes(
         job_id=job_id,
         analysed=analysed_count,
         results=results,
+    )
+
+
+# ------------------------------------------------------------------ #
+# Feature 2 — Top-N Candidate Ranking & Interview Invitation
+# ------------------------------------------------------------------ #
+
+@router.get(
+    "/jobs/{job_id}/top-candidates",
+    response_model=List[TopCandidateResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Get top N ranked candidates for a job posting (HR / Admin only)",
+)
+def get_top_candidates(
+    job_id:       int,
+    top_n:        int = Query(5, ge=1, le=100, description="Top N candidates to return"),
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(require_roles(RECRUITMENT_VIEW_CANDIDATES_ROLES)),
+):
+    return service.get_top_ranked_candidates(db, job_id=job_id, top_n=top_n)
+
+
+@router.post(
+    "/resumes/{resume_id}/interview-invite",
+    response_model=InterviewInviteResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Send interview invitation email to candidate (HR / Admin only)",
+)
+def send_interview_invitation(
+    resume_id:    int,
+    payload:      InterviewInviteRequest,
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(require_roles(RECRUITMENT_MANAGE_ROLES)),
+):
+    return service.send_interview_invitation(
+        db,
+        resume_id=resume_id,
+        payload=payload,
+        current_user=current_user,
     )

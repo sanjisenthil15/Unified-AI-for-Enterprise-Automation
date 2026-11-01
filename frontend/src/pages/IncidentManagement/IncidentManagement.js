@@ -19,6 +19,7 @@ import {
   updateIncidentStatus, assignIncident,
   resolveIncident, closeIncident,
   runAITriage, getLatestTriage, getTimeline,
+  listIncidentTeams, listTeamMembers,
 } from '../../api/incidentApi';
 import '../Recruitment/Recruitment.css';
 import './IncidentManagement.css';
@@ -61,6 +62,25 @@ function canReport(user) { return REPORT_ROLES.includes(getRoleName(user)) || ca
 
 // ── component ────────────────────────────────────────────────────────
 
+function findMatchingTeam(suggestedOwner, teamsList) {
+  if (!suggestedOwner || !teamsList?.length) return null;
+  const s = suggestedOwner.trim().toLowerCase();
+  const exact = teamsList.find(t => t.name.trim().toLowerCase() === s);
+  if (exact) return exact;
+
+  const cleanS = s.replace(/\b(team|squad|group|department|platform)\b/g, '').trim();
+  for (const t of teamsList) {
+    const tClean = t.name.toLowerCase().replace(/\b(team|squad|group|department|platform)\b/g, '').trim();
+    if (cleanS && (tClean.includes(cleanS) || cleanS.includes(tClean))) {
+      return t;
+    }
+    if (s.includes(t.name.toLowerCase()) || t.name.toLowerCase().includes(s)) {
+      return t;
+    }
+  }
+  return null;
+}
+
 export default function IncidentManagement() {
   const user = getUser();
 
@@ -100,6 +120,21 @@ export default function IncidentManagement() {
   const [actionBusy,   setActionBusy]  = useState(false);
   const [actionMsg,    setActionMsg]   = useState(null);
   const [actionData,   setActionData]  = useState({});
+
+  // Team-based AI assignment state
+  const [teams, setTeams] = useState([]);
+  const [loadingTeams, setLoadingTeams] = useState(false);
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [assignForm, setAssignForm] = useState({
+    teamId: '',
+    teamName: '',
+    userId: '',
+    notes: '',
+    aiSuggestedTeam: '',
+    matchedAiTeamId: '',
+    isOverridden: false,
+  });
 
   // ── load ──────────────────────────────────────────────────────────
 
@@ -182,9 +217,19 @@ export default function IncidentManagement() {
       if (actionModal === 'status') {
         updated = await updateIncidentStatus(selected.id, actionData.status, actionData.notes);
       } else if (actionModal === 'assign') {
-        const uid = parseInt(actionData.userId, 10);
-        if (!uid) { setActionMsg({ type: 'error', text: 'Enter a valid user ID.' }); setActionBusy(false); return; }
-        updated = await assignIncident(selected.id, uid, actionData.notes);
+        const uid = parseInt(assignForm.userId, 10);
+        if (!uid) {
+          setActionMsg({ type: 'error', text: 'Please select an employee to assign this incident.' });
+          setActionBusy(false);
+          return;
+        }
+        updated = await assignIncident(selected.id, {
+          assigned_to: uid,
+          team_id: assignForm.teamId,
+          team_name: assignForm.teamName,
+          ai_recommended_team: assignForm.aiSuggestedTeam,
+          notes: assignForm.notes,
+        });
       } else if (actionModal === 'resolve') {
         if (!actionData.rootCause?.trim()) { setActionMsg({ type: 'error', text: 'Root cause is required.' }); setActionBusy(false); return; }
         updated = await resolveIncident(selected.id, actionData.rootCause, actionData.notes);
@@ -277,10 +322,84 @@ export default function IncidentManagement() {
     setActionMsg(null);
     setActionModal('status');
   }
-  function openAssignModal() {
-    setActionData({ userId: selected?.assigned_to || '', notes: '' });
-    setActionMsg(null);
+  async function openAssignModal() {
     setActionModal('assign');
+    setActionMsg(null);
+    setLoadingTeams(true);
+    setTeamMembers([]);
+
+    const suggested = triage?.suggested_owner || selected?.ai_triage?.suggested_owner || '';
+
+    try {
+      const fetchedTeams = await listIncidentTeams();
+      setTeams(fetchedTeams);
+
+      const matched = findMatchingTeam(suggested, fetchedTeams);
+      const initialTeam = matched || (fetchedTeams.length > 0 ? fetchedTeams[0] : null);
+      const initialTeamId = initialTeam ? initialTeam.id : '';
+      const initialTeamName = initialTeam ? initialTeam.name : '';
+      const matchedId = matched ? matched.id : '';
+
+      setAssignForm({
+        teamId: initialTeamId,
+        teamName: initialTeamName,
+        userId: '',
+        notes: '',
+        aiSuggestedTeam: suggested,
+        matchedAiTeamId: matchedId,
+        isOverridden: false,
+      });
+
+      if (initialTeam) {
+        if (initialTeam.members && initialTeam.members.length > 0) {
+          setTeamMembers(initialTeam.members);
+        } else {
+          setLoadingMembers(true);
+          try {
+            const mems = await listTeamMembers(initialTeamId);
+            setTeamMembers(mems);
+          } finally {
+            setLoadingMembers(false);
+          }
+        }
+      }
+    } catch (err) {
+      setActionMsg({ type: 'error', text: 'Failed to load teams for assignment.' });
+    } finally {
+      setLoadingTeams(false);
+    }
+  }
+
+  async function handleTeamSelect(newTeamId) {
+    const chosen = teams.find(t => String(t.id) === String(newTeamId));
+    const isOver = assignForm.matchedAiTeamId && String(newTeamId) !== String(assignForm.matchedAiTeamId);
+
+    setAssignForm(prev => ({
+      ...prev,
+      teamId: newTeamId,
+      teamName: chosen ? chosen.name : '',
+      userId: '',
+      isOverridden: Boolean(isOver),
+    }));
+
+    if (!chosen) {
+      setTeamMembers([]);
+      return;
+    }
+
+    if (chosen.members && chosen.members.length > 0) {
+      setTeamMembers(chosen.members);
+    } else {
+      setLoadingMembers(true);
+      try {
+        const mems = await listTeamMembers(newTeamId);
+        setTeamMembers(mems);
+      } catch (err) {
+        setTeamMembers([]);
+      } finally {
+        setLoadingMembers(false);
+      }
+    }
   }
   function openResolveModal() {
     setActionData({ rootCause: selected?.root_cause || '', notes: '' });
@@ -530,7 +649,10 @@ export default function IncidentManagement() {
                   </div>
                   <div>
                     <span className="dmeta-label">Assigned To</span>
-                    {selected.assignee?.full_name || (selected.assigned_to ? `User #${selected.assigned_to}` : 'Unassigned')}
+                    <span>
+                      {selected.assignee?.full_name || (selected.assigned_to ? `User #${selected.assigned_to}` : 'Unassigned')}
+                      {selected.team_name && <span className="inc-assign-badge">{selected.team_name}</span>}
+                    </span>
                   </div>
                   <div>
                     <span className="dmeta-label">Reported At</span>
@@ -785,18 +907,123 @@ export default function IncidentManagement() {
             {/* Assign */}
             {actionModal === 'assign' && (
               <div>
+                {/* AI Recommendation Banner */}
+                {assignForm.aiSuggestedTeam ? (
+                  !assignForm.isOverridden && assignForm.matchedAiTeamId && String(assignForm.teamId) === String(assignForm.matchedAiTeamId) ? (
+                    <div className="inc-ai-rec-banner rec-matched" data-testid="ai-rec-matched">
+                      <span className="inc-ai-rec-icon" aria-hidden="true">✨</span>
+                      <div className="inc-ai-rec-content">
+                        <div className="inc-ai-rec-header">
+                          <span className="inc-ai-rec-title">AI Recommendation Preselected</span>
+                          <span className="inc-ai-rec-pill matched">Preselected</span>
+                        </div>
+                        <div className="inc-ai-rec-desc">
+                          Gemini suggested <strong>{assignForm.aiSuggestedTeam}</strong> based on incident analysis. You can change this team at any time.
+                        </div>
+                      </div>
+                    </div>
+                  ) : assignForm.isOverridden ? (
+                    <div className="inc-ai-rec-banner rec-overridden" data-testid="ai-rec-overridden">
+                      <span className="inc-ai-rec-icon" aria-hidden="true">⚠️</span>
+                      <div className="inc-ai-rec-content">
+                        <div className="inc-ai-rec-header">
+                          <span className="inc-ai-rec-title">AI Recommendation Overridden</span>
+                          <span className="inc-ai-rec-pill override">Manager Override</span>
+                        </div>
+                        <div className="inc-ai-rec-desc">
+                          You chose to assign to <strong>{assignForm.teamName || 'a different team'}</strong> (AI originally suggested <em>"{assignForm.aiSuggestedTeam}"</em>).
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="inc-ai-rec-banner rec-unmatched" data-testid="ai-rec-unmatched">
+                      <span className="inc-ai-rec-icon" aria-hidden="true">ℹ️</span>
+                      <div className="inc-ai-rec-content">
+                        <div className="inc-ai-rec-header">
+                          <span className="inc-ai-rec-title">Manual Team Selection Required</span>
+                          <span className="inc-ai-rec-pill neutral">No Direct Match</span>
+                        </div>
+                        <div className="inc-ai-rec-desc">
+                          AI suggested <em>"{assignForm.aiSuggestedTeam}"</em>, but no direct matching system team was found. Please choose an active team below.
+                        </div>
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  <div className="inc-ai-rec-banner rec-none" data-testid="ai-rec-none">
+                    <span className="inc-ai-rec-icon" aria-hidden="true">ℹ️</span>
+                    <div className="inc-ai-rec-content">
+                      <div className="inc-ai-rec-header">
+                        <span className="inc-ai-rec-title">Manual Team Selection</span>
+                        <span className="inc-ai-rec-pill neutral">Manual</span>
+                      </div>
+                      <div className="inc-ai-rec-desc">
+                        No prior AI triage recommendation is available for this incident. Select a team and employee manually.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Team Selection */}
                 <div className="field-group" style={{ marginBottom: '1rem' }}>
-                  <label>User ID to assign</label>
-                  <input className="field-input" type="number" min="1"
-                    value={actionData.userId || ''}
-                    onChange={e => setActionData(d => ({ ...d, userId: e.target.value }))}
-                    placeholder="Enter user ID" />
+                  <label htmlFor="inc-assign-team">Assigned Team *</label>
+                  <select
+                    id="inc-assign-team"
+                    className="field-select"
+                    value={assignForm.teamId}
+                    onChange={e => handleTeamSelect(e.target.value)}
+                    disabled={loadingTeams || actionBusy}
+                  >
+                    {loadingTeams && <option value="">Loading teams...</option>}
+                    {!loadingTeams && teams.length === 0 && <option value="">No teams available</option>}
+                    {!loadingTeams && teams.map(t => {
+                      const isAi = assignForm.matchedAiTeamId && String(t.id) === String(assignForm.matchedAiTeamId);
+                      return (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.member_count} active members){isAi ? ' ✨ (AI Suggested)' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
                 </div>
+
+                {/* Employee Selection */}
                 <div className="field-group" style={{ marginBottom: '1rem' }}>
-                  <label>Notes (optional)</label>
-                  <textarea className="field-input" rows={2} value={actionData.notes || ''}
-                    onChange={e => setActionData(d => ({ ...d, notes: e.target.value }))}
-                    style={{ resize: 'vertical' }} />
+                  <label htmlFor="inc-assign-employee">Assignee (Active Employee) *</label>
+                  <select
+                    id="inc-assign-employee"
+                    className="field-select"
+                    value={assignForm.userId}
+                    onChange={e => setAssignForm(d => ({ ...d, userId: e.target.value }))}
+                    disabled={loadingMembers || actionBusy || !assignForm.teamId}
+                  >
+                    <option value="">-- Choose Active Employee --</option>
+                    {loadingMembers && <option disabled value="">Loading members...</option>}
+                    {!loadingMembers && teamMembers.map(m => (
+                      <option key={m.user_id} value={m.user_id}>
+                        {m.full_name} — {m.job_title || m.role} ({m.email})
+                      </option>
+                    ))}
+                  </select>
+                  {!loadingMembers && assignForm.teamId && teamMembers.length === 0 && (
+                    <div style={{ fontSize: '0.78rem', color: 'var(--danger)', marginTop: '0.35rem' }}>
+                      No active employees found for this team. Please select a different team.
+                    </div>
+                  )}
+                </div>
+
+                {/* Notes */}
+                <div className="field-group" style={{ marginBottom: '1rem' }}>
+                  <label htmlFor="inc-assign-notes">Assignment Notes (optional)</label>
+                  <textarea
+                    id="inc-assign-notes"
+                    className="field-input"
+                    rows={2}
+                    value={assignForm.notes}
+                    onChange={e => setAssignForm(d => ({ ...d, notes: e.target.value }))}
+                    placeholder="Add instructions, handover notes, or SLA context..."
+                    style={{ resize: 'vertical' }}
+                  />
                 </div>
               </div>
             )}
@@ -857,8 +1084,12 @@ export default function IncidentManagement() {
             )}
 
             <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem' }}>
-              <button className="btn-primary" onClick={handleAction} disabled={actionBusy}>
-                {actionBusy ? 'Saving...' : 'Save'}
+              <button
+                className="btn-primary"
+                onClick={handleAction}
+                disabled={actionBusy || (actionModal === 'assign' && (!assignForm.userId || loadingTeams || loadingMembers))}
+              >
+                {actionBusy ? (actionModal === 'assign' ? 'Assigning...' : 'Saving...') : (actionModal === 'assign' ? 'Assign Incident' : 'Save')}
               </button>
               <button className="btn-secondary" onClick={() => setActionModal(null)}>Cancel</button>
             </div>

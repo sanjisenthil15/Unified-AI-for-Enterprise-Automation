@@ -64,6 +64,14 @@ const PRESET_ISSUES = {
   ],
 };
 
+function currentUser() {
+  try {
+    return JSON.parse(localStorage.getItem('user')) || null;
+  } catch {
+    return null;
+  }
+}
+
 export default function SupportRequestsView({
   categories = [],
   onSubmitTicket,
@@ -74,8 +82,9 @@ export default function SupportRequestsView({
   const [selectedAreaId, setSelectedAreaId] = useState(1);
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
-  const [customerName, setCustomerName] = useState('Enterprise Admin');
-  const [customerEmail, setCustomerEmail] = useState('admin@enterprise.ai');
+  const me = currentUser();
+  const [customerName, setCustomerName] = useState(me?.full_name || 'Enterprise Customer');
+  const [customerEmail, setCustomerEmail] = useState(me?.email || 'customer@enterprise.ai');
   const [referenceId, setReferenceId] = useState('');
   const [attachments, setAttachments] = useState([]);
   const [priority, setPriority] = useState('medium');
@@ -153,10 +162,17 @@ export default function SupportRequestsView({
   async function handleFinalSubmit() {
     setIsSubmitting(true);
     try {
+      const areaName = ISSUE_AREAS.find((a) => a.id === selectedAreaId)?.name || '';
+      const matchedCat = categories.find((c) =>
+        (c.name && areaName && c.name.toLowerCase().includes(areaName.split(' ')[0].toLowerCase())) ||
+        c.id === aiAnalysis?.category_id
+      );
+      const safeCatId = matchedCat?.id || (categories[0]?.id || null);
+
       const ticketPayload = {
         subject: subject.trim(),
         description: description.trim() + (referenceId ? `\n\nReference / Transaction ID: ${referenceId}` : ''),
-        category_id: aiAnalysis?.category_id || selectedAreaId || 1,
+        category_id: safeCatId,
         priority: priority || aiAnalysis?.suggested_priority || 'medium',
         channel: 'web',
         customer_name: customerName.trim(),

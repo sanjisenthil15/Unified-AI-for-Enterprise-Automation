@@ -86,6 +86,11 @@ export async function getProject(projectId) {
   return res.data;
 }
 
+export async function listProjectMembers(projectId) {
+  const res = await axiosInstance.get(`${BASE}/projects/${projectId}/members`);
+  return res.data;
+}
+
 export async function createProject({ name, description, startDate, deadline, status }) {
   const payload = { name, description: description || null, deadline: deadline || null };
   if (startDate) payload.start_date = startDate;

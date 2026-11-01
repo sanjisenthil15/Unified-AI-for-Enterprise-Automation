@@ -11,6 +11,8 @@ import io
 import json
 import re
 import uuid
+import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import UploadFile, HTTPException, status
@@ -19,6 +21,15 @@ from sqlalchemy.orm import Session
 from config.settings import settings
 from models.job_posting import JobPosting
 from models.resume      import Resume
+from core import audit
+from models.candidate import Candidate
+from modules.recruitment.schemas import (
+    InterviewInviteRequest,
+    InterviewInviteResponse,
+    TopCandidateResponse,
+)
+
+logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------ #
 # File storage
@@ -727,6 +738,245 @@ def analyze_job_resumes(db: Session, job_id: int) -> list:
             resume.status = "error"
             resume.ai_summary = json.dumps({"error": str(exc)})
             db.commit()
-            results.append(resume)
+            results.append(resume)  # end_analyze_resumes
 
     return results
+
+
+
+# ------------------------------------------------------------------ #
+# Top-N Candidate Ranking and Interview Invitation Workflow
+# ------------------------------------------------------------------ #
+
+def get_top_ranked_candidates(db: Session, job_id: int, top_n: int = 5) -> list[TopCandidateResponse]:
+    """
+    Returns the top N candidates for a job posting ranked by AI match score descending.
+    Differentiates candidates who meet screening criteria (score >= 50, strong/review recommendation)
+    from unanalyzed, missing OCR, or low-scoring candidates.
+    Gracefully handles fewer candidates than top_n.
+    """
+    if top_n < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="top_n must be a positive integer >= 1.",
+        )
+
+    # Ensure job posting exists (raises 404 if not)
+    get_job_posting(db, job_id)
+
+    resumes = db.query(Resume).filter(Resume.job_posting_id == job_id).all()
+    if not resumes:
+        return []
+
+    scored = []
+    unscored = []
+
+    for r in resumes:
+        detail = {}
+        if r.ai_summary:
+            try:
+                detail = json.loads(r.ai_summary)
+            except Exception:
+                detail = {"short_reason": r.ai_summary}
+
+        interview_invited = bool(detail.get("interview_invited", False))
+        interview_sent_at = detail.get("interview_sent_at")
+        interview_details = detail.get("interview_details")
+        matched_skills = detail.get("matched_skills") or r.strengths
+        missing_skills = detail.get("missing_skills") or r.missing_skills
+
+        # Determine application status
+        if interview_invited:
+            app_status = "Interview Scheduled"
+        elif r.recommendation == "selected":
+            app_status = "Shortlisted"
+        elif r.recommendation == "hold":
+            app_status = "Under Review"
+        elif r.recommendation == "rejected":
+            app_status = "Rejected"
+        elif r.status == "analysed":
+            app_status = "Analysed"
+        elif r.status == "extracted":
+            app_status = "Screening"
+        elif r.status == "error":
+            app_status = "Extraction Error"
+        else:
+            app_status = "Applied"
+
+        # Check screening criteria
+        is_analyzed = (r.status == "analysed" and r.ai_score is not None)
+        meets = bool(is_analyzed and (r.ai_score or 0) >= 50 and r.recommendation in ("selected", "hold"))
+
+        item_data = {
+            "resume": r,
+            "ocr_status": r.status,
+            "ai_score": r.ai_score,
+            "recommendation": r.recommendation,
+            "matched_skills": matched_skills,
+            "missing_skills": missing_skills,
+            "application_status": app_status,
+            "interview_invited": interview_invited,
+            "interview_sent_at": interview_sent_at,
+            "interview_details": interview_details,
+            "meets_criteria": meets,
+        }
+
+        if is_analyzed:
+            scored.append(item_data)
+        else:
+            unscored.append(item_data)
+
+    # Sort scored candidates by match score descending
+    scored.sort(key=lambda x: (x["ai_score"] or 0.0), reverse=True)
+    # Unscored sorted by created_at desc
+    unscored.sort(key=lambda x: x["resume"].created_at, reverse=True)
+
+    combined = scored + unscored
+    top_slice = combined[:top_n]
+
+    results = []
+    for rank_idx, item in enumerate(top_slice, start=1):
+        r = item["resume"]
+        results.append(TopCandidateResponse(
+            rank=rank_idx,
+            resume_id=r.id,
+            candidate_name=r.candidate_name,
+            candidate_email=r.candidate_email,
+            file_name=r.file_name,
+            ocr_status=item["ocr_status"],
+            ai_score=item["ai_score"],
+            recommendation=item["recommendation"],
+            matched_skills=item["matched_skills"],
+            missing_skills=item["missing_skills"],
+            application_status=item["application_status"],
+            interview_invited=item["interview_invited"],
+            interview_sent_at=item["interview_sent_at"],
+            interview_details=item["interview_details"],
+            meets_criteria=item["meets_criteria"],
+        ))
+
+    return results
+
+
+def send_interview_invitation(
+    db: Session,
+    resume_id: int,
+    payload: InterviewInviteRequest,
+    current_user,
+) -> InterviewInviteResponse:
+    """
+    Sends an interview invitation email to the candidate.
+    Uses SMTP if configured; otherwise logs and simulates delivery safely.
+    Updates candidate / resume status and logs an audit trail event.
+    """
+    resume = db.query(Resume).filter(Resume.id == resume_id).first()
+    if not resume:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Resume id={resume_id} not found.",
+        )
+
+    # Parse existing summary JSON
+    detail = {}
+    if resume.ai_summary:
+        try:
+            detail = json.loads(resume.ai_summary)
+        except Exception:
+            detail = {"short_reason": resume.ai_summary}
+
+    already_invited = bool(detail.get("interview_invited", False))
+
+    # Send email via SMTP if configured, else simulate
+    simulated = True
+    if settings.SMTP_HOST and settings.SMTP_PORT:
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+
+            msg = MIMEMultipart()
+            msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL}>"
+            msg["To"] = payload.recipient_email
+            msg["Subject"] = payload.email_subject
+            msg.attach(MIMEText(payload.email_body, "plain"))
+
+            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as server:
+                if settings.SMTP_USE_TLS:
+                    server.starttls()
+                if settings.SMTP_USER and settings.SMTP_PASSWORD:
+                    server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+                server.sendmail(settings.SMTP_FROM_EMAIL, [payload.recipient_email], msg.as_string())
+            simulated = False
+            logger.info("Successfully sent interview invitation email to %s via SMTP", payload.recipient_email)
+        except Exception as exc:
+            logger.warning("SMTP delivery failed (%s); falling back to simulated delivery", exc)
+            simulated = True
+    else:
+        logger.info(
+            "SMTP not configured; simulated email to %s: Subject=%r",
+            payload.recipient_email, payload.email_subject,
+        )
+
+    now = datetime.now(timezone.utc)
+
+    # Update resume metadata
+    detail["interview_invited"] = True
+    detail["interview_sent_at"] = now.isoformat()
+    detail["interview_details"] = {
+        "candidate_name": payload.candidate_name,
+        "job_position": payload.job_position,
+        "interview_date": payload.interview_date,
+        "interview_time": payload.interview_time,
+        "interview_mode": payload.interview_mode,
+        "recipient_email": payload.recipient_email,
+        "subject": payload.email_subject,
+        "sent_by_user_id": current_user.id,
+        "simulated": simulated,
+    }
+    resume.ai_summary = json.dumps(detail)
+
+    # Update or sync Candidate table if available
+    cand = (
+        db.query(Candidate)
+        .filter(
+            (Candidate.email == payload.recipient_email)
+            | ((Candidate.job_posting_id == resume.job_posting_id) & (Candidate.full_name == resume.candidate_name))
+        )
+        .first()
+    )
+    if cand:
+        cand.status = "interview"
+
+    # Record audit log event
+    audit.record_event(
+        db,
+        "recruitment.interview_invitation_sent",
+        "resume",
+        resume.id,
+        actor=current_user,
+        before={"interview_invited": already_invited},
+        after={
+            "candidate_name": payload.candidate_name,
+            "recipient_email": payload.recipient_email,
+            "job_position": payload.job_position,
+            "interview_date": payload.interview_date,
+            "interview_time": payload.interview_time,
+            "interview_mode": payload.interview_mode,
+            "simulated": simulated,
+            "already_invited": already_invited,
+        },
+    )
+
+    db.commit()
+    db.refresh(resume)
+
+    msg_suffix = " (simulated delivery; SMTP unconfigured)" if simulated else ""
+    return InterviewInviteResponse(
+        status="success",
+        message=f"Interview invitation sent to {payload.recipient_email}{msg_suffix}.",
+        resume_id=resume.id,
+        recipient_email=payload.recipient_email,
+        sent_at=now,
+        application_status="Interview Scheduled",
+        simulated=simulated,
+    )

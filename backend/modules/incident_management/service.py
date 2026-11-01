@@ -25,16 +25,26 @@ Timeline helper:
 
 import json
 import re
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import List, Optional, Tuple, Union
 
 from fastapi import HTTPException, status
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
 from config.settings import settings
+from core import audit
+from models.department import Department
+from models.employee import Employee
 from models.incident import Incident, IncidentAITriage, IncidentTimeline
+from models.project import Project
 from models.user import User
+from modules.incident_management.schemas import (
+    AITriageResponse,
+    IncidentResponse,
+    IncidentTeamMember,
+    IncidentTeamResponse,
+)
 
 # Import google-genai at module level. Using try/except so the server
 # starts even if the package is missing (run_ai_triage will 503 instead of crash).
@@ -57,6 +67,204 @@ _ALLOWED_TRANSITIONS: dict[str, set[str]] = {
 
 
 # ------------------------------------------------------------------ #
+
+# ------------------------------------------------------------------ #
+# Team and Assignee Resolution Helpers
+# ------------------------------------------------------------------ #
+
+def _parse_team_identifier(team_id: Union[str, int]) -> Tuple[str, int]:
+    """Returns (team_type, numeric_id) where team_type is 'project' or 'department'."""
+    if isinstance(team_id, int):
+        return ("project", team_id)
+    s = str(team_id).strip()
+    if s.startswith("proj_") or s.startswith("project_") or s.startswith("proj-"):
+        parts = s.split("_", 1) if "_" in s else s.split("-", 1)
+        return ("project", int(parts[1]))
+    if s.startswith("dept_") or s.startswith("department_") or s.startswith("dept-"):
+        parts = s.split("_", 1) if "_" in s else s.split("-", 1)
+        return ("department", int(parts[1]))
+    if s.isdigit():
+        return ("project", int(s))
+    return ("unknown", 0)
+
+
+def _get_user_team_name(db: Session, user_id: Optional[int]) -> Optional[str]:
+    """Return the project or department name of an active employee user."""
+    if not user_id:
+        return None
+    emp = db.query(Employee).filter(
+        Employee.user_id == user_id,
+        Employee.deleted_at.is_(None),
+    ).first()
+    if not emp:
+        return None
+    if emp.project_id:
+        proj = db.query(Project).filter(Project.id == emp.project_id).first()
+        if proj:
+            return proj.name
+    if emp.department_id:
+        dept = db.query(Department).filter(Department.id == emp.department_id).first()
+        if dept:
+            return dept.name
+    return None
+
+
+def _teams_match(ai_team: Optional[str], selected_team: Optional[str]) -> bool:
+    """Case-insensitive and clean match between AI recommended team and selected team."""
+    if not ai_team or not selected_team:
+        return False
+    a = ai_team.strip().lower()
+    b = selected_team.strip().lower()
+    if a == b:
+        return True
+    clean_a = re.sub(r"\b(team|squad|platform|group|department)\b", "", a).strip()
+    clean_b = re.sub(r"\b(team|squad|platform|group|department)\b", "", b).strip()
+    if clean_a and clean_b and (clean_a in clean_b or clean_b in clean_a):
+        return True
+    return False
+
+
+def list_incident_teams(db: Session) -> List[IncidentTeamResponse]:
+    """List available project and department teams with their active employee members."""
+    teams: List[IncidentTeamResponse] = []
+
+    # 1. Projects
+    projects = (
+        db.query(Project)
+        .filter(Project.status != "archived")
+        .order_by(Project.name.asc())
+        .all()
+    )
+    for p in projects:
+        active_emps = (
+            db.query(Employee)
+            .join(User, User.id == Employee.user_id)
+            .filter(
+                Employee.project_id == p.id,
+                Employee.status == "active",
+                Employee.deleted_at.is_(None),
+                User.is_active == True,
+                User.deleted_at.is_(None),
+            )
+            .order_by(User.full_name.asc())
+            .all()
+        )
+        if not active_emps and p.id not in (2, 3, 4):
+            continue
+        members = [
+            IncidentTeamMember(
+                user_id=e.user.id,
+                employee_id=e.id,
+                full_name=e.user.full_name,
+                email=e.user.email,
+                job_title=e.job_title,
+                role=e.user.role.name if (e.user and e.user.role) else "employee",
+                status=e.status,
+            )
+            for e in active_emps
+            if e.user
+        ]
+        teams.append(
+            IncidentTeamResponse(
+                id=f"proj_{p.id}",
+                team_id=p.id,
+                team_type="project",
+                name=p.name,
+                description=p.description,
+                member_count=len(members),
+                members=members,
+            )
+        )
+
+    # 2. Departments with active members
+    departments = db.query(Department).order_by(Department.name.asc()).all()
+    for d in departments:
+        active_emps = (
+            db.query(Employee)
+            .join(User, User.id == Employee.user_id)
+            .filter(
+                Employee.department_id == d.id,
+                Employee.status == "active",
+                Employee.deleted_at.is_(None),
+                User.is_active == True,
+                User.deleted_at.is_(None),
+            )
+            .order_by(User.full_name.asc())
+            .all()
+        )
+        if active_emps:
+            members = [
+                IncidentTeamMember(
+                    user_id=e.user.id,
+                    employee_id=e.id,
+                    full_name=e.user.full_name,
+                    email=e.user.email,
+                    job_title=e.job_title,
+                    role=e.user.role.name if (e.user and e.user.role) else "employee",
+                    status=e.status,
+                )
+                for e in active_emps
+                if e.user
+            ]
+            teams.append(
+                IncidentTeamResponse(
+                    id=f"dept_{d.id}",
+                    team_id=d.id,
+                    team_type="department",
+                    name=d.name,
+                    description=d.description,
+                    member_count=len(members),
+                    members=members,
+                )
+            )
+
+    return teams
+
+
+def list_team_members(db: Session, team_identifier: Union[str, int]) -> List[IncidentTeamMember]:
+    """Dynamically return active employees belonging to the specified team."""
+    team_type, num_id = _parse_team_identifier(team_identifier)
+    q = (
+        db.query(Employee)
+        .join(User, User.id == Employee.user_id)
+        .filter(
+            Employee.status == "active",
+            Employee.deleted_at.is_(None),
+            User.is_active == True,
+            User.deleted_at.is_(None),
+        )
+    )
+    if team_type == "project":
+        q = q.filter(Employee.project_id == num_id)
+    elif team_type == "department":
+        q = q.filter(Employee.department_id == num_id)
+    else:
+        s_id = str(team_identifier).strip().lower()
+        proj = db.query(Project).filter(sqlfunc.lower(Project.name) == s_id).first()
+        if proj:
+            q = q.filter(Employee.project_id == proj.id)
+        else:
+            dept = db.query(Department).filter(sqlfunc.lower(Department.name) == s_id).first()
+            if dept:
+                q = q.filter(Employee.department_id == dept.id)
+            else:
+                return []
+
+    active_emps = q.order_by(User.full_name.asc()).all()
+    return [
+        IncidentTeamMember(
+            user_id=e.user.id,
+            employee_id=e.id,
+            full_name=e.user.full_name,
+            email=e.user.email,
+            job_title=e.job_title,
+            role=e.user.role.name if (e.user and e.user.role) else "employee",
+            status=e.status,
+        )
+        for e in active_emps
+        if e.user
+    ]
+
 # Shared fetch helper
 # ------------------------------------------------------------------ #
 
@@ -168,8 +376,25 @@ def list_incidents(
 # Get single
 # ------------------------------------------------------------------ #
 
-def get_incident(db: Session, incident_id: int) -> Incident:
-    return get_incident_or_404(db, incident_id)
+def get_incident(db: Session, incident_id: int) -> IncidentResponse:
+    incident = get_incident_or_404(db, incident_id)
+    resp = IncidentResponse.model_validate(incident)
+    if incident.assigned_to:
+        t_name = _get_user_team_name(db, incident.assigned_to)
+        resp.team_name = t_name
+        if resp.assignee:
+            resp.assignee.team_name = t_name
+            if incident.assignee and incident.assignee.role:
+                resp.assignee.role = incident.assignee.role.name
+    latest_triage = (
+        db.query(IncidentAITriage)
+        .filter(IncidentAITriage.incident_id == incident.id)
+        .order_by(IncidentAITriage.generated_at.desc())
+        .first()
+    )
+    if latest_triage:
+        resp.ai_triage = AITriageResponse.model_validate(latest_triage)
+    return resp
 
 
 # ------------------------------------------------------------------ #
@@ -257,12 +482,18 @@ def update_incident_status(
 # ------------------------------------------------------------------ #
 
 def assign_incident(
-    db: Session, incident_id: int, assigned_to_user_id: int,
-    actor_id: int, notes: Optional[str] = None,
-) -> Incident:
+    db: Session,
+    incident_id: int,
+    assigned_to_user_id: int,
+    actor_id: int,
+    notes: Optional[str] = None,
+    team_id: Optional[Union[str, int]] = None,
+    team_name: Optional[str] = None,
+    ai_recommended_team: Optional[str] = None,
+) -> IncidentResponse:
     incident = get_incident_or_404(db, incident_id)
 
-    # Validate the target user exists
+    # 1. Validate target user exists and is active
     target_user = db.query(User).filter(
         User.id == assigned_to_user_id,
         User.deleted_at.is_(None),
@@ -274,23 +505,108 @@ def assign_incident(
             detail=f"User id={assigned_to_user_id} not found or inactive.",
         )
 
-    old_assignee = incident.assigned_to
+    # 2. Validate user is an active employee
+    target_employee = db.query(Employee).filter(
+        Employee.user_id == target_user.id,
+        Employee.deleted_at.is_(None),
+    ).first()
+    if not target_employee or target_employee.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot assign incident to an inactive employee.",
+        )
+
+    # 3. Validate team membership if team_id provided
+    if team_id is not None:
+        team_type, num_id = _parse_team_identifier(team_id)
+        if team_type == "project":
+            if target_employee.project_id != num_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Employee '{target_user.full_name}' does not belong to the selected team.",
+                )
+            if not team_name:
+                p = db.query(Project).filter(Project.id == num_id).first()
+                if p:
+                    team_name = p.name
+        elif team_type == "department":
+            if target_employee.department_id != num_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Employee '{target_user.full_name}' does not belong to the selected team.",
+                )
+            if not team_name:
+                d = db.query(Department).filter(Department.id == num_id).first()
+                if d:
+                    team_name = d.name
+
+    if not team_name:
+        team_name = _get_user_team_name(db, target_user.id) or "Unassigned Team"
+
+    # 4. Determine AI recommendation and override status
+    latest_triage = (
+        db.query(IncidentAITriage)
+        .filter(IncidentAITriage.incident_id == incident.id)
+        .order_by(IncidentAITriage.generated_at.desc())
+        .first()
+    )
+    ai_team = latest_triage.suggested_owner if latest_triage else ai_recommended_team
+    is_override = False
+    if ai_team and team_name:
+        if not _teams_match(ai_team, team_name):
+            is_override = True
+
+    # 5. Capture prior state for audit log
+    old_assignee_id = incident.assigned_to
+    old_user = db.query(User).filter(User.id == old_assignee_id).first() if old_assignee_id else None
+    old_team_name = _get_user_team_name(db, old_assignee_id) if old_assignee_id else None
+    actor_user = db.query(User).filter(User.id == actor_id).first()
+
+    # 6. Apply assignment
     incident.assigned_to = assigned_to_user_id
+
+    # 7. Record timeline entry
+    override_suffix = f" (Overrode AI recommendation '{ai_team}')" if is_override else ""
+    tl_note = notes if notes else f"Assigned to {target_user.full_name} [{team_name}]{override_suffix}."
+    if notes and is_override:
+        tl_note += f" [Overrode AI recommended team: '{ai_team}']"
 
     _add_timeline(
         db,
         incident_id=incident.id,
         action="incident_assigned",
         actor_id=actor_id,
-        notes=notes or (
-            f"Assigned to {target_user.full_name} (id={assigned_to_user_id})"
-            + (f", previously {old_assignee}" if old_assignee else "")
-        ),
+        notes=tl_note,
+    )
+
+    # 8. Record audit log
+    action_name = "incident.assigned_override" if is_override else "incident.assigned"
+    audit.label(db, incident, action_name)
+    audit.record_event(
+        db,
+        action=action_name,
+        entity_type="incident",
+        entity_id=incident.id,
+        before={
+            "assigned_to": old_assignee_id,
+            "assignee_name": old_user.full_name if old_user else None,
+            "team_name": old_team_name,
+        },
+        after={
+            "assigned_to": target_user.id,
+            "assignee_name": target_user.full_name,
+            "team_id": str(team_id) if team_id is not None else None,
+            "team_name": team_name,
+            "ai_recommended_team": ai_team,
+            "is_override": is_override,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+        actor=actor_user,
     )
 
     db.commit()
     db.refresh(incident)
-    return incident
+    return get_incident(db, incident.id)
 
 
 # ------------------------------------------------------------------ #

@@ -39,6 +39,7 @@ from modules.employee_management.schemas import (
     EmployeeResponse,
     EmployeeUpdate,
     ProjectCreate,
+    ProjectMemberResponse,
     ProjectResponse,
     ProjectStatusUpdate,
     ProjectUpdate,
@@ -175,6 +176,16 @@ def get_project(
     current_employee: Optional[Employee] = Depends(get_current_employee_optional),
 ):
     return service.get_project(db, project_id, current_user=current_user, current_employee=current_employee)
+
+
+@router.get("/projects/{project_id}/members", response_model=List[ProjectMemberResponse], summary="List team members of a project (scoped by project assignment)")
+def list_project_members(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
+):
+    return service.list_project_members(db, project_id, current_user=current_user, current_employee=current_employee)
 
 
 @router.post(

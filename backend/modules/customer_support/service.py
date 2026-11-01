@@ -85,6 +85,7 @@ from modules.customer_support.schemas import (
     SupportRequestAnalysisResponse,
     SupportTeamCreate,
     SupportTeamResponse,
+    SupportAgentResponse,
     TicketCreateRequest,
     TicketDetailResponse,
     TicketEscalateRequest,
@@ -1188,6 +1189,14 @@ def create_chat_session(
     now = datetime.now(timezone.utc)
     c_name = payload.customer_name if payload else "Enterprise User"
     c_email = str(payload.customer_email) if (payload and payload.customer_email) else "user@enterprise.ai"
+    if user_id and _is_db_available(db):
+        try:
+            u = db.query(User).filter(User.id == user_id).first()
+            if u:
+                c_name = u.full_name
+                c_email = u.email
+        except Exception:
+            pass
     init_title = "New Support Conversation"
 
     if _is_db_available(db):
@@ -2078,10 +2087,16 @@ def create_support_ticket(
         if sess is not None:
             session_id = payload.session_id
 
-    # 4. Resolve customer info from user if not explicitly given
-    sub_user = db.query(User).filter(User.id == submitted_by_id).first() if submitted_by_id else None
-    customer_name = payload.customer_name or (sub_user.full_name if sub_user else "Enterprise Customer")
-    customer_email = str(payload.customer_email) if payload.customer_email else (sub_user.email if sub_user else "user@enterprise.ai")
+    # 4. Resolve customer info directly from authenticated user (prevent spoofing)
+    sub_user = db.query(User).options(joinedload(User.role)).filter(User.id == submitted_by_id).first() if submitted_by_id else None
+    if sub_user:
+        customer_name = sub_user.full_name
+        customer_email = sub_user.email
+        customer_role = sub_user.role.name if sub_user.role else None
+    else:
+        customer_name = payload.customer_name or "Enterprise Customer"
+        customer_email = str(payload.customer_email) if payload.customer_email else "user@enterprise.ai"
+        customer_role = None
 
     # 5. Idempotent duplicate check: avoid duplicate tickets on fast retry
     recent_cutoff = now - timedelta(seconds=60)
@@ -2107,6 +2122,9 @@ def create_support_ticket(
             assigned_to=existing_duplicate.assigned_to,
             customer_name=existing_duplicate.customer_name,
             customer_email=existing_duplicate.customer_email,
+            customer_role=customer_role,
+            team_name=existing_duplicate.team.name if existing_duplicate.team else "Unassigned",
+            assigned_agent_name=existing_duplicate.agent.full_name if existing_duplicate.agent else None,
             subject=existing_duplicate.subject,
             description=existing_duplicate.description,
             priority=existing_duplicate.priority,
@@ -2219,6 +2237,9 @@ def create_support_ticket(
         assigned_to=t.assigned_to,
         customer_name=t.customer_name,
         customer_email=t.customer_email,
+        customer_role=customer_role,
+        team_name=t.team.name if t.team else "Unassigned",
+        assigned_agent_name=t.agent.full_name if t.agent else None,
         subject=t.subject,
         description=t.description,
         priority=t.priority,
@@ -2251,6 +2272,8 @@ def list_support_tickets(
     status_filter: Optional[str] = None,
     priority_filter: Optional[str] = None,
     category_id: Optional[int] = None,
+    team_id: Optional[int] = None,
+    assigned_to: Optional[int] = None,
     search: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
@@ -2263,6 +2286,8 @@ def list_support_tickets(
     query = db.query(SupportTicket).options(
         joinedload(SupportTicket.category),
         joinedload(SupportTicket.team),
+        joinedload(SupportTicket.agent),
+        joinedload(SupportTicket.submitter).joinedload(User.role),
     )
 
     if not has_full_access:
@@ -2282,6 +2307,10 @@ def list_support_tickets(
         query = query.filter(SupportTicket.priority == priority_filter.lower())
     if category_id:
         query = query.filter(SupportTicket.category_id == category_id)
+    if team_id:
+        query = query.filter(SupportTicket.team_id == team_id)
+    if assigned_to:
+        query = query.filter(SupportTicket.assigned_to == assigned_to)
     if search:
         q = f"%{search.lower()}%"
         query = query.filter(
@@ -2299,6 +2328,9 @@ def list_support_tickets(
         for t in db_tickets:
             c_at = t.created_at or datetime.now(timezone.utc)
             sla_stat, sla_rem = compute_ticket_sla(c_at, t.priority, t.status)
+            agent_name = t.agent.full_name if t.agent else None
+            cust_role = t.submitter.role.name if (t.submitter and t.submitter.role) else None
+            t_name = t.team.name if t.team else "Unassigned"
             results.append(
                 TicketListItem(
                     id=t.id,
@@ -2309,10 +2341,11 @@ def list_support_tickets(
                     category_id=t.category_id,
                     category_name=t.category.name if t.category else "General Inquiry",
                     team_id=t.team_id,
-                    team_name=t.team.name if t.team else "General Support Team",
+                    team_name=t_name,
                     customer_name=t.customer_name,
                     customer_email=t.customer_email,
-                    assigned_agent_name=None,
+                    customer_role=cust_role,
+                    assigned_agent_name=agent_name,
                     sla_status=sla_stat,
                     sla_time_remaining=sla_rem,
                     created_at=c_at,
@@ -2330,7 +2363,12 @@ def list_support_tickets(
 def get_support_ticket(db: Session, ticket_id: int, current_user: Optional[Any] = None) -> TicketDetailResponse:
     t = (
         db.query(SupportTicket)
-        .options(joinedload(SupportTicket.category), joinedload(SupportTicket.team))
+        .options(
+            joinedload(SupportTicket.category),
+            joinedload(SupportTicket.team),
+            joinedload(SupportTicket.agent).joinedload(User.role),
+            joinedload(SupportTicket.submitter).joinedload(User.role),
+        )
         .filter(SupportTicket.id == ticket_id)
         .first()
     )
@@ -2394,6 +2432,21 @@ def get_support_ticket(db: Session, ticket_id: int, current_user: Optional[Any] 
             else None
         )
 
+        agent_resp = (
+            SupportAgentResponse(
+                id=t.agent.id,
+                full_name=t.agent.full_name,
+                email=t.agent.email,
+                role=t.agent.role.name if (t.agent and t.agent.role) else "support_agent",
+                is_active=t.agent.deleted_at is None,
+            )
+            if t.agent
+            else None
+        )
+        cust_role = t.submitter.role.name if (t.submitter and t.submitter.role) else None
+        agent_name = t.agent.full_name if t.agent else None
+        t_name = t.team.name if t.team else "Unassigned"
+
         return TicketDetailResponse(
             id=t.id,
             session_id=t.session_id,
@@ -2403,6 +2456,9 @@ def get_support_ticket(db: Session, ticket_id: int, current_user: Optional[Any] 
             assigned_to=t.assigned_to,
             customer_name=t.customer_name,
             customer_email=t.customer_email,
+            customer_role=cust_role,
+            team_name=t_name,
+            assigned_agent_name=agent_name,
             subject=t.subject,
             description=t.description,
             priority=t.priority,
@@ -2417,6 +2473,7 @@ def get_support_ticket(db: Session, ticket_id: int, current_user: Optional[Any] 
             updated_at=t.updated_at or c_at,
             category=cat_resp,
             team=team_resp,
+            agent=agent_resp,
             messages=msgs,
             chat_transcript=None,
         )
@@ -2500,17 +2557,28 @@ def update_support_ticket(
         if payload.priority:
             t.priority = payload.priority
         if payload.assigned_to is not None:
-            t.assigned_to = payload.assigned_to
+            if payload.assigned_to == 0:
+                t.assigned_to = None
+            else:
+                agent_user = db.query(User).filter(User.id == payload.assigned_to).first()
+                if not agent_user:
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, f"User id={payload.assigned_to} not found.")
+                t.assigned_to = payload.assigned_to
+                if t.status == "open":
+                    t.status = "assigned"
         if payload.category_id is not None:
             cat = db.query(SupportCategory).filter(SupportCategory.id == payload.category_id).first()
             if not cat:
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Category id={payload.category_id} not found.")
             t.category_id = payload.category_id
         if payload.team_id is not None:
-            team = db.query(SupportTeam).filter(SupportTeam.id == payload.team_id).first()
-            if not team:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Support team id={payload.team_id} not found.")
-            t.team_id = payload.team_id
+            if payload.team_id == 0:
+                t.team_id = None
+            else:
+                team = db.query(SupportTeam).filter(SupportTeam.id == payload.team_id).first()
+                if not team:
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Support team id={payload.team_id} not found.")
+                t.team_id = payload.team_id
         t.updated_at = now
         db.commit()
         db.refresh(t)
@@ -2685,6 +2753,39 @@ def create_support_category(db: Session, payload: SupportCategoryCreate) -> Supp
     }
     dev_store.categories.append(new_cat)
     return SupportCategoryResponse(**new_cat)
+
+
+def list_support_agents(db: Session) -> List[SupportAgentResponse]:
+    from models.role import Role
+    if _is_db_available(db):
+        try:
+            users = (
+                db.query(User)
+                .join(Role)
+                .filter(
+                    Role.name.in_(["support_agent", "admin"]),
+                    User.deleted_at.is_(None),
+                )
+                .order_by(User.full_name.asc())
+                .all()
+            )
+            return [
+                SupportAgentResponse(
+                    id=u.id,
+                    full_name=u.full_name,
+                    email=u.email,
+                    role=u.role.name if u.role else "support_agent",
+                    is_active=u.deleted_at is None,
+                )
+                for u in users
+            ]
+        except Exception as exc:
+            logger.warning(f"Failed to query support agents: {exc}")
+    # Dev store fallback
+    return [
+        SupportAgentResponse(id=1, full_name="Demo Admin", email="demo@demo.com", role="admin", is_active=True),
+        SupportAgentResponse(id=16288, full_name="Aiden Cross", email="aiden.cross@employee.demo", role="support_agent", is_active=True),
+    ]
 
 
 def list_support_teams(db: Session) -> List[SupportTeamResponse]:

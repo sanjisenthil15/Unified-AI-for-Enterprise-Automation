@@ -6,8 +6,8 @@ Phase 2 adds AnalysisResult and updates ResumeResponse / ResumeListItem.
 """
 
 from datetime import datetime
-from typing import List, Optional
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field, EmailStr
 
 
 # ------------------------------------------------------------------ #
@@ -129,3 +129,48 @@ class AnalysisResponse(BaseModel):
     job_id:   int
     analysed: int               # how many resumes were newly analysed
     results:  List[ResumeListItem]
+
+
+# ------------------------------------------------------------------ #
+# Top-N Candidate Ranking & Interview Invitation schemas
+# ------------------------------------------------------------------ #
+
+class TopCandidateResponse(BaseModel):
+    rank: Optional[int] = None
+    resume_id: int
+    candidate_name: str
+    candidate_email: Optional[str] = None
+    file_name: str
+    ocr_status: str  # extracted | uploaded | error
+    ai_score: Optional[float] = None
+    recommendation: Optional[str] = None
+    matched_skills: Optional[str] = None
+    missing_skills: Optional[str] = None
+    application_status: str
+    interview_invited: bool = False
+    interview_sent_at: Optional[datetime] = None
+    interview_details: Optional[Dict[str, Any]] = None
+    meets_criteria: bool = True
+
+    model_config = {"from_attributes": True}
+
+
+class InterviewInviteRequest(BaseModel):
+    recipient_email: EmailStr
+    candidate_name: str = Field(..., min_length=1, max_length=150)
+    job_position: str = Field(..., min_length=1, max_length=150)
+    interview_date: str = Field(..., min_length=1, max_length=50)
+    interview_time: str = Field(..., min_length=1, max_length=50)
+    interview_mode: str = Field(..., min_length=1, max_length=200)
+    email_subject: str = Field(..., min_length=3, max_length=255)
+    email_body: str = Field(..., min_length=10)
+
+
+class InterviewInviteResponse(BaseModel):
+    status: str
+    message: str
+    resume_id: int
+    recipient_email: str
+    sent_at: datetime
+    application_status: str
+    simulated: bool = False

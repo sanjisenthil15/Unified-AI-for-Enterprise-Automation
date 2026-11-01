@@ -269,12 +269,26 @@ def test_c3_ticket_user_scoping_and_visibility(client, new_user):
 # 4. C4 VULNERABILITY TESTS — INCIDENT MANAGEMENT ROLES
 # =====================================================================
 
-def test_c4_incident_roles_and_employee_reporting(client, new_user):
+def test_c4_incident_roles_and_employee_reporting(client, new_user, db):
     """C4 REGRESSION: Any employee can report an incident; only write roles can modify."""
+    from datetime import date
+    from models.employee import Employee
+
     employee = new_user(role=ROLE_EMPLOYEE)
     support_agent = new_user(role=ROLE_SUPPORT_AGENT)
     manager = new_user(role=ROLE_MANAGER)
     admin = new_user(role=ROLE_ADMIN)
+
+    # Incidents can only be assigned to active employees.
+    db.add(Employee(
+        user_id=support_agent["id"],
+        employee_code=f"EMP-C4-{uuid.uuid4().hex[:6]}",
+        job_title="Support Engineer",
+        hire_date=date(2026, 1, 1),
+        employment_type="full_time",
+        status="active",
+    ))
+    db.commit()
 
     # 1. Regular employee CAN report (create) an incident
     r = client.post("/api/v1/incidents", headers=employee["headers"], json={

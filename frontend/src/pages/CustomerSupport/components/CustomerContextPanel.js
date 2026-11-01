@@ -53,7 +53,7 @@ export default function CustomerContextPanel({
             <span className="cs-cust-val orange">High Priority Escalation</span>
           </div>
           <div className="cs-cust-row">
-            <span className="cs-cust-label">Assigned Support Pool:</span>
+            <span className="cs-cust-label">Default Support Team:</span>
             <span className="cs-cust-val">Enterprise Response Team</span>
           </div>
         </div>
