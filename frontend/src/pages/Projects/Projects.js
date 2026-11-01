@@ -18,6 +18,8 @@ import {
 } from '../../api/employeeApi';
 import Avatar from '../../components/common/Avatar';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
+import Toast from '../../components/common/Toast';
+import { useToast } from '../../hooks/useToast';
 import {
   PROJECT_ADMIN_ROLES, PROJECT_STATUSES, PROJECT_STATUS_BADGE, allowedNextStatuses,
   canEditProjectMetadata, canManageProject, projectStatusLabel,
@@ -87,6 +89,7 @@ export default function Projects() {
   const [editForm, setEditForm] = useState(null);
   const [managerPick, setManagerPick] = useState('');
   const [leadPick, setLeadPick] = useState('');
+  const { toast, showToast, dismissToast } = useToast();
 
   const load = useCallback(async () => {
     try {
@@ -149,10 +152,15 @@ export default function Projects() {
       await action();
       // Refresh first so the confirmation never sits next to stale data.
       await load();
-      if (successText) setNotice(successText);
+      if (successText) {
+        setNotice(successText);
+        showToast(successText, 'success');
+      }
       return true;
     } catch (err) {
-      setError(apiErrorText(err, 'That action could not be completed.'));
+      const msg = apiErrorText(err, 'That action could not be completed.');
+      setError(msg);
+      showToast(msg, 'error');
       return false;
     } finally {
       setBusy(false);
@@ -581,6 +589,17 @@ export default function Projects() {
           )}
         </div>
       )}
+
+      {/* Floating Toast notification container */}
+      <div className="app-toast-container">
+        {toast && (
+          <Toast
+            message={toast.message}
+            type={toast.type}
+            onClose={dismissToast}
+          />
+        )}
+      </div>
     </div>
   );
 }

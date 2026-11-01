@@ -8,6 +8,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { getMyEmployeeRecord } from '../../api/employeeApi';
+import Avatar from '../../components/common/Avatar';
 import ChangePasswordForm from '../ChangePassword/ChangePasswordForm';
 import '../Recruitment/Recruitment.css';
 
@@ -30,7 +31,10 @@ export default function Profile() {
     <div className="module-page">
       <div className="module-page-header">
         <div className="module-page-icon green" aria-hidden="true">👤</div>
-        <div><h1>My Profile</h1><p>Your employment record on file.</p></div>
+        <div>
+          <h1>My Profile</h1>
+          <p>Your employment record on file.</p>
+        </div>
       </div>
 
       <div className="content-panel">
@@ -41,16 +45,20 @@ export default function Profile() {
             No employee record yet — contact HR to be onboarded.
           </p>
         ) : employee ? (
-          <dl style={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: '0.75rem' }}>
-            <dt style={{ fontWeight: 600 }}>Name</dt><dd>{employee.user.full_name}</dd>
-            <dt style={{ fontWeight: 600 }}>Email</dt><dd>{employee.user.email}</dd>
-            <dt style={{ fontWeight: 600 }}>Job title</dt><dd>{employee.job_title}</dd>
-            <dt style={{ fontWeight: 600 }}>Project</dt><dd>{employee.project?.name || '—'}</dd>
-            <dt style={{ fontWeight: 600 }}>Department</dt><dd>{employee.department?.name || '—'}</dd>
-            <dt style={{ fontWeight: 600 }}>Employment type</dt><dd>{employee.employment_type.replace('_', ' ')}</dd>
-            <dt style={{ fontWeight: 600 }}>Hire date</dt><dd>{employee.hire_date}</dd>
-            <dt style={{ fontWeight: 600 }}>Status</dt><dd><span className="badge green">{employee.status}</span></dd>
-          </dl>
+          <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <Avatar name={employee.user.full_name} email={employee.user.email} size={72} />
+            <dl style={{ display: 'grid', gridTemplateColumns: '160px 1fr', rowGap: '0.75rem', flex: 1, minWidth: '260px' }}>
+              <dt style={{ fontWeight: 600 }}>Name</dt><dd>{employee.user.full_name}</dd>
+              <dt style={{ fontWeight: 600 }}>Email</dt><dd>{employee.user.email}</dd>
+              <dt style={{ fontWeight: 600 }}>Role</dt><dd><span className="badge purple">{employee.user?.role?.name || 'employee'}</span></dd>
+              <dt style={{ fontWeight: 600 }}>Job title</dt><dd>{employee.job_title}</dd>
+              <dt style={{ fontWeight: 600 }}>Project</dt><dd>{employee.project?.name || '—'}</dd>
+              <dt style={{ fontWeight: 600 }}>Department</dt><dd>{employee.department?.name || '—'}</dd>
+              <dt style={{ fontWeight: 600 }}>Employment type</dt><dd>{employee.employment_type.replace('_', ' ')}</dd>
+              <dt style={{ fontWeight: 600 }}>Hire date</dt><dd>{employee.hire_date}</dd>
+              <dt style={{ fontWeight: 600 }}>Status</dt><dd><span className="badge green">{employee.status}</span></dd>
+            </dl>
+          </div>
         ) : null}
       </div>
 

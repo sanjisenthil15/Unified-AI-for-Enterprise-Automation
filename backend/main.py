@@ -82,6 +82,13 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logging.getLogger(__name__).warning("Startup meeting recovery skipped", exc_info=True)
 
+    # Ensure demo organization accounts and project assignments are initialized
+    try:
+        from scripts.setup_demo_organization import run_setup
+        run_setup()
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).warning("Demo organization setup skipped", exc_info=True)
+
     _warn_if_demo_admin_password_unchanged()
 
     # Server-side escalation checks, independent of browser polling

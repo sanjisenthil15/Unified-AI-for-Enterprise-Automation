@@ -1,4 +1,5 @@
 /* Global resets and CSS custom properties for the entire application */
+@import './components/common/Toast.css';
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -48,4 +49,50 @@ html, body, #root {
   color: var(--text-primary);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
+}
+
+/* ── Interactive Feedback & Highlight Animations ─────────────────── */
+@keyframes rowHighlightPulse {
+  0% {
+    background-color: rgba(124, 92, 252, 0.18);
+    box-shadow: inset 0 0 0 1.5px rgba(124, 92, 252, 0.4);
+  }
+  40% {
+    background-color: rgba(124, 92, 252, 0.08);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+@keyframes cardHighlightPulse {
+  0% {
+    background-color: rgba(124, 92, 252, 0.15);
+    border-color: var(--primary);
+    transform: translateY(-2px);
+  }
+  60% {
+    background-color: rgba(124, 92, 252, 0.05);
+  }
+  100% {
+    background-color: transparent;
+    border-color: var(--border);
+    transform: none;
+  }
+}
+
+.row-updated-highlight td {
+  animation: rowHighlightPulse 2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.card-updated-highlight {
+  animation: cardHighlightPulse 2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row-updated-highlight td,
+  .card-updated-highlight {
+    animation: none;
+  }
 }

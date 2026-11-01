@@ -1,0 +1,137 @@
+/* Toast Notification Styling */
+.app-toast-container {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 420px;
+  width: calc(100% - 3rem);
+  pointer-events: none;
+}
+
+.app-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1.1rem;
+  border-radius: 10px;
+  background: var(--surface, #ffffff);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+  font-size: 0.88rem;
+  color: var(--text-primary, #1e293b);
+  border: 1px solid var(--border, #e2e8f0);
+  animation: toastSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: all 0.2s ease;
+}
+
+.toast-icon-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.toast-svg-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* Success Toast */
+.app-toast-success {
+  border-left: 4px solid #10b981;
+  background: #ffffff;
+}
+.app-toast-success .toast-icon-container {
+  background: #ecfdf5;
+  color: #10b981;
+}
+.app-toast-success .toast-check-icon {
+  animation: checkmarkPop 0.35s ease-out forwards;
+}
+
+/* Error Toast */
+.app-toast-error {
+  border-left: 4px solid #ef4444;
+  background: #ffffff;
+}
+.app-toast-error .toast-icon-container {
+  background: #fef2f2;
+  color: #ef4444;
+}
+
+/* Info Toast */
+.app-toast-info {
+  border-left: 4px solid var(--primary, #7c3aed);
+  background: #ffffff;
+}
+.app-toast-info .toast-icon-container {
+  background: #f5f3ff;
+  color: var(--primary, #7c3aed);
+}
+
+.toast-body {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+.toast-close-btn {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-muted, #94a3b8);
+  padding: 0.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s;
+}
+
+.toast-close-btn:hover {
+  color: var(--text-primary, #1e293b);
+}
+
+@keyframes toastSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes checkmarkPop {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-toast {
+    animation: none;
+  }
+  .app-toast-success .toast-check-icon {
+    animation: none;
+  }
+}
+
