@@ -26,6 +26,68 @@ from models.resume      import Resume
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads" / "resumes"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+# Resumes are read fully into memory for text extraction — cap them so one
+# upload can't exhaust a small instance's RAM.
+MAX_RESUME_BYTES = 10 * 1024 * 1024
+_SAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._ -]+")
+
+
+class ResumeFileError(ValueError):
+    """An uploaded resume failed validation (message is safe to show)."""
+
+
+# Resume.file_path for files in permanent object storage:
+#   "obj:<bucket>/<key>"   e.g. "obj:recruitment-resumes/job_4/3f2a…_cv.pdf"
+# Rows from before object storage keep their original local disk path.
+OBJECT_REF_PREFIX = "obj:"
+
+
+def resume_object_ref(file_path: str | None) -> tuple[str, str] | None:
+    """(bucket, key) for an object-storage resume, else None (legacy local path)."""
+    if not file_path or not file_path.startswith(OBJECT_REF_PREFIX):
+        return None
+    bucket, _, key = file_path[len(OBJECT_REF_PREFIX):].partition("/")
+    return (bucket, key) if bucket and key else None
+
+
+def _store_resume_pdf(job_id: int, safe_name: str, file_bytes: bytes) -> tuple[str, str]:
+    """Upload to the private resumes bucket; returns (bucket, key)."""
+    from core.object_storage import get_object_storage, unique_key
+
+    bucket = settings.STORAGE_BUCKET_RESUMES
+    key = unique_key(f"job_{int(job_id)}", filename=safe_name)
+    get_object_storage().upload_bytes(bucket, key, file_bytes, "application/pdf")
+    return bucket, key
+
+
+def _discard_object(bucket: str, key: str) -> None:
+    from core.object_storage import ObjectStorageError, get_object_storage
+
+    try:
+        get_object_storage().delete(bucket, [key])
+    except ObjectStorageError:
+        print(f"[RecruitmentService] Orphaned resume object left for cleanup: {bucket}/{key}")
+
+
+def _read_validated_pdf(upload_file: UploadFile) -> tuple[str, bytes]:
+    """Return (safe stored-name suffix, bytes) for a genuine, size-capped PDF.
+
+    The client-supplied filename never reaches the filesystem as-is: only
+    its final path component is kept, restricted to safe characters, so
+    names like '../../x.pdf' or 'a/b.pdf' can't escape UPLOAD_DIR.
+    """
+    original = upload_file.filename or ""
+    if not original.lower().endswith(".pdf"):
+        raise ResumeFileError(f"Only PDF files are accepted. Got: {original}")
+    file_bytes = upload_file.file.read(MAX_RESUME_BYTES + 1)
+    if len(file_bytes) > MAX_RESUME_BYTES:
+        raise ResumeFileError(f"'{original}' is larger than {MAX_RESUME_BYTES // (1024 * 1024)} MB.")
+    if not file_bytes.startswith(b"%PDF-"):
+        raise ResumeFileError(f"'{original}' is not a valid PDF file.")
+    base = original.replace("\\", "/").rsplit("/", 1)[-1]
+    safe = _SAFE_NAME_CHARS.sub("_", base).strip(" .") or "resume.pdf"
+    return safe[-120:], file_bytes
+
 
 # ------------------------------------------------------------------ #
 # PDF text extraction
@@ -128,16 +190,18 @@ def save_and_extract_resume(
     upload_file: UploadFile,
 ) -> Resume:
     """Save PDF to disk, extract text, persist Resume row."""
-    if not upload_file.filename.lower().endswith(".pdf"):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Only PDF files are accepted. Got: {upload_file.filename}",
-        )
-    file_bytes  = upload_file.file.read()
-    unique_name = f"{uuid.uuid4().hex}_{upload_file.filename}"
-    file_path   = UPLOAD_DIR / unique_name
-    with open(file_path, "wb") as f:
-        f.write(file_bytes)
+    try:
+        safe_name, file_bytes = _read_validated_pdf(upload_file)
+    except ResumeFileError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    from core.object_storage import ObjectStorageError
+
+    # Bytes go to permanent storage first; the row is only committed once
+    # they're safely stored, and the object is removed if the commit fails.
+    try:
+        bucket, key = _store_resume_pdf(job_id, safe_name, file_bytes)
+    except ObjectStorageError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
 
     extracted = extract_text_from_pdf(file_bytes)
     extraction_status = "extracted" if extracted.strip() else "error"
@@ -147,12 +211,17 @@ def save_and_extract_resume(
         candidate_name  = candidate_name,
         candidate_email = candidate_email,
         file_name       = upload_file.filename,
-        file_path       = str(file_path),
+        file_path       = f"{OBJECT_REF_PREFIX}{bucket}/{key}",
         extracted_text  = extracted,
         status          = extraction_status,
     )
-    db.add(resume)
-    db.commit()
+    try:
+        db.add(resume)
+        db.commit()
+    except Exception:
+        db.rollback()
+        _discard_object(bucket, key)
+        raise
     db.refresh(resume)
     return resume
 
@@ -302,6 +371,8 @@ def bulk_upload_resumes(
     Auto-extracts candidate name + email from each PDF.
     Returns list of dicts with result per file.
     """
+    from core.object_storage import ObjectStorageError
+
     get_job_posting(db, job_id)   # raise 404 early if job missing
     results = []
     for upload_file in files:
@@ -328,11 +399,20 @@ def bulk_upload_resumes(
                 results.append(entry)
                 continue
 
-            file_bytes = upload_file.file.read()
-            unique_name = f"{uuid.uuid4().hex}_{upload_file.filename}"
-            file_path = UPLOAD_DIR / unique_name
-            with open(file_path, "wb") as f:
-                f.write(file_bytes)
+            try:
+                safe_name, file_bytes = _read_validated_pdf(upload_file)
+            except ResumeFileError as exc:
+                entry["status"] = "error"
+                entry["error"] = str(exc)
+                results.append(entry)
+                continue
+            try:
+                bucket, key = _store_resume_pdf(job_id, safe_name, file_bytes)
+            except ObjectStorageError as exc:
+                entry["status"] = "error"
+                entry["error"] = str(exc)
+                results.append(entry)
+                continue
 
             extracted = extract_text_from_pdf(file_bytes)
             extraction_status = "extracted" if extracted.strip() else "error"
@@ -347,21 +427,27 @@ def bulk_upload_resumes(
                 candidate_name  = candidate_name,
                 candidate_email = candidate_email,
                 file_name       = upload_file.filename,
-                file_path       = str(file_path),
+                file_path       = f"{OBJECT_REF_PREFIX}{bucket}/{key}",
                 extracted_text  = extracted,
                 status          = extraction_status,
             )
-            db.add(resume)
-            db.commit()
+            try:
+                db.add(resume)
+                db.commit()
+            except Exception:
+                db.rollback()
+                _discard_object(bucket, key)
+                raise
             db.refresh(resume)
 
             entry["resume_id"]        = resume.id
             entry["candidate_name"]   = candidate_name
             entry["candidate_email"]  = candidate_email
             entry["extraction_status"] = extraction_status
-        except Exception as exc:
+        except Exception:
+            db.rollback()
             entry["status"] = "error"
-            entry["error"]  = str(exc)
+            entry["error"]  = "Could not save this resume. Please try again."
         results.append(entry)
     return results
 
@@ -389,15 +475,48 @@ def update_resume_info(db: Session, resume_id: int, payload) -> Resume:
 def delete_resume(db: Session, resume_id: int) -> None:
     """Delete a resume record and its file from disk."""
     resume = get_resume(db, resume_id)
-    # Remove file from disk if it exists
-    try:
-        p = Path(resume.file_path)
-        if p.exists():
-            p.unlink()
-    except Exception as exc:
-        print(f"[RecruitmentService] Could not delete file {resume.file_path}: {exc}")
+    ref = resume_object_ref(resume.file_path)
     db.delete(resume)
     db.commit()
+    # Remove the file only after the row is gone, so a failed commit never
+    # leaves a record pointing at a deleted file.
+    if ref is not None:
+        _discard_object(*ref)
+    else:
+        try:
+            p = Path(resume.file_path)
+            if p.exists():
+                p.unlink()
+        except Exception as exc:
+            print(f"[RecruitmentService] Could not delete file {resume.file_path}: {exc}")
+
+
+def resume_download_url(db: Session, resume_id: int) -> dict:
+    """Short-lived signed URL for the original PDF (caller authorizes)."""
+    from core.object_storage import ObjectStorageError, get_object_storage
+
+    resume = get_resume(db, resume_id)
+    ref = resume_object_ref(resume.file_path)
+    ttl = settings.SIGNED_URL_TTL_SECONDS
+    if ref is None:
+        # Legacy upload from before object storage: only reachable while the
+        # file still exists in the local resumes folder of this machine.
+        legacy = Path(resume.file_path or "")
+        try:
+            inside = legacy.resolve().parent == UPLOAD_DIR.resolve()
+        except OSError:
+            inside = False
+        if settings.STORAGE_BACKEND != "local" or not inside or not legacy.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="The original PDF of this older upload is no longer available; its extracted text is kept.",
+            )
+        ref = (settings.STORAGE_BUCKET_RESUMES, legacy.name)
+    try:
+        url = get_object_storage().signed_url(ref[0], ref[1], ttl)
+    except ObjectStorageError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+    return {"url": url, "expires_in": ttl, "file_name": resume.file_name}
 
 
 # ------------------------------------------------------------------ #

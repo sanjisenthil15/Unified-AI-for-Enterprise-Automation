@@ -22,6 +22,7 @@ Layout (base dir = backend/uploads/meetings/, git-ignored):
 
 from __future__ import annotations
 
+import logging
 import shutil
 import uuid
 from abc import ABC, abstractmethod
@@ -30,6 +31,8 @@ from pathlib import Path
 from typing import BinaryIO, Iterable
 
 from modules.meeting_intelligence.config import meeting_settings
+
+logger = logging.getLogger(__name__)
 
 _READ_CHUNK = 1024 * 1024  # 1 MiB
 
@@ -55,6 +58,10 @@ class EmptyUploadError(StorageError):
 
 class StoredFileNotFoundError(StorageError, FileNotFoundError):
     """A referenced stored file does not exist on the backend."""
+
+
+class StorageUnavailableError(StorageError):
+    """Permanent storage could not be reached; nothing was kept."""
 
 
 @dataclass(frozen=True)
@@ -224,6 +231,57 @@ class LocalMeetingVideoStorage(MeetingVideoStorage):
             shutil.rmtree(mdir, ignore_errors=True)
 
 
+class ObjectBackedMeetingVideoStorage(LocalMeetingVideoStorage):
+    """Local working copy for the processing pipeline (FFmpeg / Whisper /
+    Gemini read real files) + the original upload kept permanently in a
+    private object-storage bucket under the same relative path the DB
+    stores. Derived files (extracted audio) stay local: they are cheap to
+    regenerate, so they're never duplicated into the bucket.
+
+    After a restart wipes the local disk, resolve() transparently restores
+    the source file from the bucket, so "Retry processing" still works.
+    """
+
+    def __init__(self, base_dir, *, allowed_extensions, max_bytes, object_storage, bucket):
+        super().__init__(base_dir, allowed_extensions=allowed_extensions, max_bytes=max_bytes)
+        self.objects = object_storage
+        self.bucket = bucket
+
+    def save_video(self, meeting_id, *, fileobj, original_filename, content_type=None):
+        from core.object_storage import ObjectStorageError
+
+        stored = super().save_video(
+            meeting_id, fileobj=fileobj, original_filename=original_filename, content_type=content_type,
+        )
+        try:
+            self.objects.upload_file(self.bucket, stored.relative_path, stored.absolute_path, content_type)
+        except ObjectStorageError as exc:
+            Path(stored.absolute_path).unlink(missing_ok=True)
+            raise StorageUnavailableError(
+                "The recording could not be stored permanently. Please try again later."
+            ) from exc
+        return stored
+
+    def resolve(self, relative_path):
+        from core.object_storage import ObjectNotFoundError, ObjectStorageError
+
+        path = super().resolve(relative_path)
+        if not path.is_file():
+            try:
+                self.objects.download_to(self.bucket, relative_path, path)
+            except ObjectNotFoundError:
+                pass  # derived file (e.g. audio) — the pipeline regenerates it
+            except ObjectStorageError:
+                logger.warning("Could not restore %s from object storage", relative_path, exc_info=True)
+        return path
+
+    def delete_meeting_files(self, meeting_id):
+        super().delete_meeting_files(meeting_id)
+        prefix = f"{int(meeting_id)}/"
+        keys = [o["key"] for o in self.objects.list(self.bucket, prefix)]
+        self.objects.delete(self.bucket, keys)
+
+
 # --------------------------------------------------------------------------- #
 # Entry point
 # --------------------------------------------------------------------------- #
@@ -234,9 +292,19 @@ def get_storage() -> MeetingVideoStorage:
     """Return the process-wide storage backend (local filesystem for now)."""
     global _default_storage
     if _default_storage is None:
-        _default_storage = LocalMeetingVideoStorage(
-            meeting_settings.storage_path,
+        from config.settings import settings
+        from core.object_storage import get_object_storage
+
+        common = dict(
             allowed_extensions=meeting_settings.allowed_video_extensions,
             max_bytes=meeting_settings.max_upload_mb * 1024 * 1024,
         )
+        if settings.STORAGE_BACKEND == "supabase":
+            _default_storage = ObjectBackedMeetingVideoStorage(
+                meeting_settings.storage_path, **common,
+                object_storage=get_object_storage(), bucket=settings.STORAGE_BUCKET_MEETINGS,
+            )
+        else:
+            # Local mode: the working copy IS the stored file.
+            _default_storage = LocalMeetingVideoStorage(meeting_settings.storage_path, **common)
     return _default_storage

@@ -54,6 +54,12 @@ export default function OnlineMeeting() {
           setEligibleProjects(projects);
           return;
         }
+        if (currentRole() === 'manager') {
+          const myUser = JSON.parse(localStorage.getItem('user') || '{}');
+          const managed = projects.filter((p) => p.manager?.id === myUser.id);
+          setEligibleProjects(managed.length ? managed : projects);
+          return;
+        }
         const me = await getMyEmployeeRecord().catch(() => null);
         if (!me) return;
         const led = getLedProjects(me.id, projects);
@@ -212,12 +218,25 @@ function LiveSession({ id }) {
         </div>
         {session?.status === 'ending' && <p role="status">Finishing accepted input and final analysis. Transcript remains available.</p>}
         {session?.status === 'ended' && (
-          <p role="status">
-            {session.persisted
-              ? <>Meeting ended and saved to your <Link to="/meetings/offline">Meeting Intelligence history</Link>
-                  {session.project_id && ' — action items can be assigned there with a deadline.'}</>
-              : 'Meeting ended, but saving it to your Meeting Intelligence history failed. Download your results below to keep a copy.'}
-          </p>
+          <div>
+            <p role="status">
+              {session.persisted
+                ? <>Meeting ended and saved to your <Link to="/meetings">Meeting Intelligence history</Link>
+                    {session.project_id && ' — action items can be reviewed and converted to Sprint tasks.'}</>
+                : 'Meeting ended, but saving it to your Meeting Intelligence history failed. Download your results below to keep a copy.'}
+            </p>
+            {session.persisted && session.linked_meeting_id && (
+              <div style={{ marginTop: '0.8rem' }}>
+                <Link
+                  to={`/meetings?meeting=${session.linked_meeting_id}`}
+                  className="mi-btn mi-btn-primary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}
+                >
+                  📋 Review Action Items →
+                </Link>
+              </div>
+            )}
+          </div>
         )}
       </div>
       {error && <div className="mi-error" role="alert">{error}</div>}

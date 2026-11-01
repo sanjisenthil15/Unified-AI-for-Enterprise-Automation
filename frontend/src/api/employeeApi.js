@@ -81,12 +81,45 @@ export async function listProjects() {
   return res.data;
 }
 
-export async function createProject({ name, description, deadline }) {
-  const res = await axiosInstance.post(`${BASE}/projects`, { name, description, deadline: deadline || null });
+export async function getProject(projectId) {
+  const res = await axiosInstance.get(`${BASE}/projects/${projectId}`);
+  return res.data;
+}
+
+export async function createProject({ name, description, startDate, deadline, status }) {
+  const payload = { name, description: description || null, deadline: deadline || null };
+  if (startDate) payload.start_date = startDate;
+  if (status) payload.status = status;
+  const res = await axiosInstance.post(`${BASE}/projects`, payload);
+  return res.data;
+}
+
+export async function updateProject(projectId, { name, description, startDate, deadline }) {
+  const payload = {};
+  if (name !== undefined) payload.name = name;
+  if (description !== undefined) payload.description = description;
+  if (startDate !== undefined) payload.start_date = startDate;
+  if (deadline !== undefined) payload.deadline = deadline;
+  const res = await axiosInstance.patch(`${BASE}/projects/${projectId}`, payload);
+  return res.data;
+}
+
+export async function updateProjectStatus(projectId, status) {
+  const res = await axiosInstance.patch(`${BASE}/projects/${projectId}/status`, { status });
+  return res.data;
+}
+
+export async function deleteProject(projectId) {
+  const res = await axiosInstance.delete(`${BASE}/projects/${projectId}`);
   return res.data;
 }
 
 export async function assignTeamLead(projectId, employeeId) {
   const res = await axiosInstance.post(`${BASE}/projects/${projectId}/team-lead`, { employee_id: employeeId });
+  return res.data;
+}
+
+export async function assignProjectManager(projectId, managerUserId) {
+  const res = await axiosInstance.post(`${BASE}/projects/${projectId}/manager`, { manager_user_id: managerUserId });
   return res.data;
 }

@@ -28,6 +28,11 @@ from sqlalchemy.orm import Session
 
 from config.database import get_db
 from core.dependencies import get_current_user, require_roles
+from core.permissions import (
+    INCIDENT_ASSIGN_ROLES,
+    INCIDENT_REPORT_ROLES,
+    INCIDENT_WRITE_ROLES,
+)
 from models.user import User
 
 from modules.incident_management import service
@@ -46,8 +51,9 @@ from modules.incident_management.schemas import (
 
 router = APIRouter(prefix="/incidents", tags=["Incident Management"])
 
-_WRITE_ROLES  = ["admin", "support_agent"]
-_ASSIGN_ROLES = ["admin", "support_agent"]
+_WRITE_ROLES  = INCIDENT_WRITE_ROLES
+_ASSIGN_ROLES = INCIDENT_ASSIGN_ROLES
+_REPORT_ROLES = INCIDENT_REPORT_ROLES
 
 
 # ------------------------------------------------------------------ #
@@ -74,12 +80,12 @@ def incident_statistics(
     "",
     response_model=IncidentResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Report a new incident (it_engineer / admin / manager)",
+    summary="Report a new incident (any authenticated employee, manager, or admin)",
 )
 def create_incident(
     payload:      IncidentCreate,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_roles(_WRITE_ROLES)),
+    current_user: User    = Depends(require_roles(_REPORT_ROLES)),
 ):
     return service.create_incident(db, payload, reporter_id=current_user.id)
 

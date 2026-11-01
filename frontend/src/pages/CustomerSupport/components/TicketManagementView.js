@@ -125,6 +125,7 @@ export default function TicketManagementView({
             >
               <option value="ALL">All Statuses</option>
               <option value="OPEN">Open Queue</option>
+              <option value="ASSIGNED">Assigned</option>
               <option value="IN_PROGRESS">In Progress</option>
               <option value="ESCALATED">Escalated</option>
               <option value="WAITING_FOR_CUSTOMER">Waiting for Customer</option>

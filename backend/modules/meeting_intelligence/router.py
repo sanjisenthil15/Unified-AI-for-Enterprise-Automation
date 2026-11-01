@@ -36,6 +36,11 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from config.database import get_db
+from core.authorization import (
+    assert_can_link_project_meeting,
+    assert_can_review_action_items,
+    assert_can_view_meeting,
+)
 from core.dependencies import get_current_employee_optional, get_current_user
 from models.employee import Employee
 from models.user import User
@@ -45,9 +50,12 @@ from modules.meeting_intelligence.schemas import (
     ActionItemOut,
     AnalysisResponse,
     AssignActionItem,
+    ConfirmActionItem,
     ConvertActionItem,
+    ConvertActionItemReq,
     MeetingListItem,
     MeetingResponse,
+    RejectActionItem,
     ScheduledMeetingOut,
     ScheduleMeetingCreate,
     SpeakerOut,
@@ -79,8 +87,10 @@ async def upload_meeting(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
     storage: MeetingVideoStorage = Depends(storage_dependency),
 ):
+    assert_can_link_project_meeting(db, project_id, current_user, current_employee)
     meeting = service.create_meeting(
         db,
         created_by=current_user.id,
@@ -95,14 +105,15 @@ async def upload_meeting(
     return meeting
 
 
-@router.get("", response_model=List[MeetingListItem], summary="Meeting history (own meetings)")
+@router.get("", response_model=List[MeetingListItem], summary="Meeting history (scoped to role/membership)")
 def list_meetings(
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
 ):
-    return service.list_meetings(db, current_user.id, skip=skip, limit=limit)
+    return service.list_meetings(db, current_user, current_employee, skip=skip, limit=limit)
 
 
 @router.post(
@@ -117,6 +128,7 @@ def schedule_meeting(
     current_user: User = Depends(get_current_user),
     current_employee: Optional[Employee] = Depends(get_current_employee_optional),
 ):
+    assert_can_link_project_meeting(db, payload.project_id, current_user, current_employee)
     meeting = service.schedule_meeting(
         db,
         organizer=current_user,
@@ -163,8 +175,37 @@ def get_meeting(
     meeting_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
 ):
-    return service.get_owned_meeting(db, meeting_id, current_user.id)
+    meeting = service.get_meeting(db, meeting_id)
+    assert_can_view_meeting(db, meeting, current_user, current_employee)
+    return meeting
+
+
+@router.get("/{meeting_id}/recording/download-url", summary="Short-lived signed link to the original recording")
+def get_recording_download_url(
+    meeting_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
+):
+    """Same visibility rule as the meeting itself. The object key is the
+    relative path stored on the meeting (identical in local and cloud mode)."""
+    from config.settings import settings
+    from core.object_storage import ObjectNotFoundError, ObjectStorageError, get_object_storage
+
+    meeting = service.get_meeting(db, meeting_id)
+    assert_can_view_meeting(db, meeting, current_user, current_employee)
+    if not meeting.source_video_path:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "This meeting has no stored recording.")
+    ttl = settings.SIGNED_URL_TTL_SECONDS
+    try:
+        url = get_object_storage().signed_url(settings.STORAGE_BUCKET_MEETINGS, meeting.source_video_path, ttl)
+    except ObjectNotFoundError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "The recording file is no longer available.")
+    except ObjectStorageError as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc))
+    return {"url": url, "expires_in": ttl, "file_name": meeting.source_video_filename}
 
 
 @router.get(
@@ -176,8 +217,10 @@ def get_transcript(
     meeting_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
 ):
-    service.get_owned_meeting(db, meeting_id, current_user.id)
+    meeting = service.get_meeting(db, meeting_id)
+    assert_can_view_meeting(db, meeting, current_user, current_employee)
     transcript = service.get_meeting_transcript(db, meeting_id)
     return TranscriptResponse(
         meeting_id=meeting_id,
@@ -200,8 +243,10 @@ def get_analysis(
     meeting_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
 ):
-    service.get_owned_meeting(db, meeting_id, current_user.id)
+    meeting = service.get_meeting(db, meeting_id)
+    assert_can_view_meeting(db, meeting, current_user, current_employee)
     analysis = service.get_meeting_analysis(db, meeting_id)
     return AnalysisResponse(
         meeting_id=meeting_id,
@@ -224,8 +269,10 @@ def get_action_items(
     meeting_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
 ):
-    service.get_owned_meeting(db, meeting_id, current_user.id)
+    meeting = service.get_meeting(db, meeting_id)
+    assert_can_view_meeting(db, meeting, current_user, current_employee)
     return service.list_meeting_action_items(db, meeting_id)
 
 
@@ -240,15 +287,61 @@ def assign_action_item(
     payload: AssignActionItem,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
 ):
-    service.get_owned_meeting(db, meeting_id, current_user.id)
+    meeting = service.get_meeting(db, meeting_id)
+    assert_can_view_meeting(db, meeting, current_user, current_employee)
+    if meeting.project_id is not None:
+        assert_can_review_action_items(db, meeting, current_user, current_employee)
+    elif meeting.created_by != current_user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Meeting id={meeting_id} not found.")
     return service.assign_action_item(db, meeting_id, action_item_id, payload.assigned_to_user_id)
+
+
+@router.post(
+    "/{meeting_id}/action-items/{action_item_id}/confirm",
+    response_model=ActionItemOut,
+    summary="Confirm a proposed action item with assigned employee and deadline",
+)
+def confirm_action_item(
+    meeting_id: int,
+    action_item_id: int,
+    payload: ConfirmActionItem,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
+):
+    meeting = service.get_meeting(db, meeting_id)
+    return service.confirm_action_item(
+        db, current_user, current_employee, meeting, action_item_id,
+        payload.assignee_id, payload.due_date, payload.final_description,
+    )
+
+
+@router.post(
+    "/{meeting_id}/action-items/{action_item_id}/reject",
+    response_model=ActionItemOut,
+    summary="Reject a proposed action item with a required reason",
+)
+def reject_action_item(
+    meeting_id: int,
+    action_item_id: int,
+    payload: RejectActionItem,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
+):
+    meeting = service.get_meeting(db, meeting_id)
+    return service.reject_action_item(
+        db, current_user, current_employee, meeting, action_item_id,
+        payload.rejection_reason,
+    )
 
 
 @router.post(
     "/{meeting_id}/action-items/{action_item_id}/convert",
     response_model=ActionItemOut,
-    summary="Convert an action item into an assigned Sprint task",
+    summary="Convert a confirmed action item into an assigned Sprint task",
 )
 def convert_action_item(
     meeting_id: int,
@@ -258,7 +351,7 @@ def convert_action_item(
     current_user: User = Depends(get_current_user),
     current_employee: Optional[Employee] = Depends(get_current_employee_optional),
 ):
-    meeting = service.get_owned_meeting(db, meeting_id, current_user.id)
+    meeting = service.get_meeting(db, meeting_id)
     return service.convert_action_item_to_task(
         db, current_user, current_employee, meeting, action_item_id,
         payload.sprint_id, payload.assignee_id, payload.due_date,

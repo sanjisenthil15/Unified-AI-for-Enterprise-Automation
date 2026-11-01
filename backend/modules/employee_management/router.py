@@ -4,17 +4,18 @@ modules/employee_management/router.py
 FastAPI router for the Employee Management module.
 
 Endpoints:
-    GET    /employee-management/me                   — the caller's own employee record (any user)
-    GET    /employee-management/employees             — directory (admin / hr_manager)
-    POST   /employee-management/employees             — onboard a new hire (admin / hr_manager)
-    GET    /employee-management/employees/{id}        — single employee (admin / hr_manager)
-    PATCH  /employee-management/employees/{id}        — update job title/department/status (admin / hr_manager)
+    GET    /employee-management/me                      — the caller's own employee record (any user)
+    GET    /employee-management/employees              — directory (admin / hr_manager / manager)
+    POST   /employee-management/employees              — onboard a new hire (admin / hr_manager)
+    GET    /employee-management/employees/{id}         — single employee (admin / hr_manager / manager)
+    PATCH  /employee-management/employees/{id}         — update job title/department/status (admin / hr_manager)
     POST   /employee-management/employees/{id}/terminate — mark terminated (admin / hr_manager)
-    GET    /employee-management/departments           — list departments (any authenticated user)
-    POST   /employee-management/departments           — create a department (admin / hr_manager)
-    GET    /employee-management/projects              — list projects + team leads (any authenticated user)
-    POST   /employee-management/projects              — create a project (admin / hr_manager)
+    GET    /employee-management/departments            — list departments (any authenticated user)
+    POST   /employee-management/departments            — create a department (admin / hr_manager)
+    GET    /employee-management/projects               — list projects + team leads + managers (any authenticated user)
+    POST   /employee-management/projects               — create a project (admin / hr_manager)
     POST   /employee-management/projects/{id}/team-lead — assign the team lead (admin / hr_manager)
+    POST   /employee-management/projects/{id}/manager   — assign the project Manager (admin / hr_manager)
 """
 
 from typing import List, Optional
@@ -24,10 +25,12 @@ from sqlalchemy.orm import Session
 
 from config.database import get_db
 from core.dependencies import get_current_employee_optional, get_current_user, require_roles
+from core.permissions import EMPLOYEE_MANAGE_ROLES, EMPLOYEE_VIEW_ROLES
 from models.employee import Employee
 from models.user import User
 
 from modules.employee_management.schemas import (
+    AssignProjectManager,
     AssignTeamLead,
     DepartmentCreate,
     DepartmentResponse,
@@ -37,12 +40,15 @@ from modules.employee_management.schemas import (
     EmployeeUpdate,
     ProjectCreate,
     ProjectResponse,
+    ProjectStatusUpdate,
+    ProjectUpdate,
 )
 from modules.employee_management import service
 
 router = APIRouter(prefix="/employee-management", tags=["Employee Management"])
 
-_MANAGE_ROLES = ["admin", "hr_manager"]
+_MANAGE_ROLES = EMPLOYEE_MANAGE_ROLES
+_VIEW_ROLES = EMPLOYEE_VIEW_ROLES
 
 
 # ------------------------------------------------------------------ #
@@ -87,13 +93,13 @@ def create_department(
 
 @router.get(
     "/employees", response_model=List[EmployeeResponse],
-    summary="Employee directory (Admin / HR Manager only)",
+    summary="Employee directory (Admin, HR Manager, Manager)",
 )
 def list_employees(
     department_id: Optional[int] = None,
     status_filter: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(_MANAGE_ROLES)),
+    current_user: User = Depends(require_roles(_VIEW_ROLES)),
 ):
     return service.list_employees(db, department_id=department_id, status_filter=status_filter)
 
@@ -113,12 +119,12 @@ def create_employee(
 
 @router.get(
     "/employees/{employee_id}", response_model=EmployeeResponse,
-    summary="Get a single employee (Admin / HR Manager only)",
+    summary="Get a single employee (Admin, HR Manager, Manager)",
 )
 def get_employee(
     employee_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(_MANAGE_ROLES)),
+    current_user: User = Depends(require_roles(_VIEW_ROLES)),
 ):
     return service.get_employee(db, employee_id)
 
@@ -152,12 +158,23 @@ def terminate_employee(
 # Projects
 # ------------------------------------------------------------------ #
 
-@router.get("/projects", response_model=List[ProjectResponse], summary="List projects and their team leads")
+@router.get("/projects", response_model=List[ProjectResponse], summary="List projects and their team leads and managers")
 def list_projects(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
 ):
-    return service.list_projects(db)
+    return service.list_projects(db, current_user=current_user, current_employee=current_employee)
+
+
+@router.get("/projects/{project_id}", response_model=ProjectResponse, summary="Get project details")
+def get_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
+):
+    return service.get_project(db, project_id, current_user=current_user, current_employee=current_employee)
 
 
 @router.post(
@@ -173,6 +190,36 @@ def create_project(
     return service.create_project(db, payload, current_employee)
 
 
+@router.patch("/projects/{project_id}", response_model=ProjectResponse, summary="Update project metadata")
+def update_project(
+    project_id: int,
+    payload: ProjectUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return service.update_project(db, project_id, payload, current_user)
+
+
+@router.patch("/projects/{project_id}/status", response_model=ProjectResponse, summary="Update project lifecycle status")
+def update_project_status(
+    project_id: int,
+    payload: ProjectStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    current_employee: Optional[Employee] = Depends(get_current_employee_optional),
+):
+    return service.update_project_status(db, project_id, payload.status, current_user, current_employee)
+
+
+@router.delete("/projects/{project_id}", summary="Delete an empty unassociated project (Admin / HR Manager only)")
+def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(_MANAGE_ROLES)),
+):
+    return service.delete_project(db, project_id, current_user)
+
+
 @router.post(
     "/projects/{project_id}/team-lead", response_model=ProjectResponse,
     summary="Assign a project's team lead — must already be a member of the project (Admin / HR Manager only)",
@@ -184,3 +231,16 @@ def assign_team_lead(
     current_user: User = Depends(require_roles(_MANAGE_ROLES)),
 ):
     return service.assign_team_lead(db, project_id, payload.employee_id)
+
+
+@router.post(
+    "/projects/{project_id}/manager", response_model=ProjectResponse,
+    summary="Assign or reassign a project's Manager (Admin / HR Manager only)",
+)
+def assign_project_manager(
+    project_id: int,
+    payload: AssignProjectManager,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(_MANAGE_ROLES)),
+):
+    return service.assign_project_manager(db, project_id, payload.manager_user_id)

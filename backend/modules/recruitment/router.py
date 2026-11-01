@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from config.database import get_db
 from core.dependencies import get_current_user, require_roles
+from core.permissions import RECRUITMENT_MANAGE_ROLES, RECRUITMENT_VIEW_CANDIDATES_ROLES
 from models.user import User
 
 from modules.recruitment.schemas import (
@@ -52,7 +53,7 @@ router = APIRouter(prefix="/recruitment", tags=["Recruitment"])
 def create_job(
     payload:      JobPostingCreate,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
+    current_user: User    = Depends(require_roles(RECRUITMENT_MANAGE_ROLES)),
 ):
     return service.create_job_posting(db, payload, created_by_id=current_user.id)
 
@@ -83,7 +84,7 @@ def update_job(
     job_id:       int,
     payload:      JobPostingUpdate,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
+    current_user: User    = Depends(require_roles(RECRUITMENT_MANAGE_ROLES)),
 ):
     return service.update_job_posting(db, job_id, payload)
 
@@ -93,7 +94,7 @@ def update_job(
 def delete_job(
     job_id:       int,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
+    current_user: User    = Depends(require_roles(RECRUITMENT_MANAGE_ROLES)),
 ):
     service.delete_job_posting(db, job_id)
 
@@ -111,7 +112,7 @@ async def upload_resume(
     candidate_email: Optional[str]  = Form(None),
     resume_file:     UploadFile     = File(...),
     db:              Session        = Depends(get_db),
-    current_user:    User           = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
+    current_user:    User           = Depends(require_roles(RECRUITMENT_MANAGE_ROLES)),
 ):
     service.get_job_posting(db, job_id)
     return service.save_and_extract_resume(
@@ -128,7 +129,7 @@ async def bulk_upload_resumes(
     job_id:       int,
     files:        List[UploadFile] = File(...),
     db:           Session          = Depends(get_db),
-    current_user: User             = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
+    current_user: User             = Depends(require_roles(RECRUITMENT_MANAGE_ROLES)),
 ):
     results = service.bulk_upload_resumes(db, job_id, files)
     succeeded  = sum(1 for r in results if r["status"] == "ok")
@@ -149,7 +150,7 @@ async def bulk_upload_resumes(
 def list_resumes(
     job_id:       int,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(get_current_user),
+    current_user: User    = Depends(require_roles(RECRUITMENT_VIEW_CANDIDATES_ROLES)),
 ):
     service.get_job_posting(db, job_id)
     return service.list_resumes_for_job(db, job_id)
@@ -160,9 +161,19 @@ def list_resumes(
 def get_resume(
     resume_id:    int,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(get_current_user),
+    current_user: User    = Depends(require_roles(RECRUITMENT_VIEW_CANDIDATES_ROLES)),
 ):
     return service.get_resume(db, resume_id)
+
+
+@router.get("/resumes/{resume_id}/download-url",
+            summary="Short-lived signed link to the original PDF (recruitment roles only)")
+def get_resume_download_url(
+    resume_id:    int,
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(require_roles(RECRUITMENT_VIEW_CANDIDATES_ROLES)),
+):
+    return service.resume_download_url(db, resume_id)
 
 
 @router.put("/resumes/{resume_id}", response_model=ResumeResponse,
@@ -171,7 +182,7 @@ def update_resume(
     resume_id:    int,
     payload:      ResumeUpdate,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
+    current_user: User    = Depends(require_roles(RECRUITMENT_MANAGE_ROLES)),
 ):
     return service.update_resume_info(db, resume_id, payload)
 
@@ -181,7 +192,7 @@ def update_resume(
 def delete_resume(
     resume_id:    int,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
+    current_user: User    = Depends(require_roles(RECRUITMENT_MANAGE_ROLES)),
 ):
     service.delete_resume(db, resume_id)
 
@@ -194,7 +205,7 @@ def delete_resume(
             summary="Real recruitment statistics")
 def recruitment_stats(
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(get_current_user),
+    current_user: User    = Depends(require_roles(RECRUITMENT_VIEW_CANDIDATES_ROLES)),
 ):
     return service.get_recruitment_stats(db)
 
@@ -212,7 +223,7 @@ def recruitment_stats(
 def analyze_resumes(
     job_id:       int,
     db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_roles(["admin", "hr_manager", "recruiter"])),
+    current_user: User    = Depends(require_roles(RECRUITMENT_MANAGE_ROLES)),
 ):
     results = service.analyze_job_resumes(db, job_id)
     analysed_count = sum(1 for r in results if r.status == "analysed")

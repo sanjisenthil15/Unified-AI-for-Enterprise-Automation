@@ -2,6 +2,7 @@
 
 from models.meeting import Meeting
 from models.meeting_action_item import MeetingActionItem
+from tests.helpers import complete_first_login
 
 EMP_BASE = "/api/v1/employee-management"
 SPR_BASE = "/api/v1/sprints"
@@ -27,8 +28,7 @@ def _onboard(client, admin_headers, email, full_name="Test Employee", project_id
     temp_password = r.json()["temporary_password"]
     employee_id = r.json()["employee"]["id"]
     user_id = r.json()["employee"]["user"]["id"]
-    login = client.post("/api/v1/auth/login", json={"email": email, "password": temp_password})
-    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    headers = complete_first_login(client, email, temp_password)
     return {"employee_id": employee_id, "user_id": user_id, "headers": headers}
 
 
@@ -36,6 +36,7 @@ def test_convert_action_item_creates_sprint_task(client, db, new_user, unique_em
     admin = new_user("Admin User")
     project = client.post(f"{EMP_BASE}/projects", headers=admin["headers"], json={
         "name": f"Project {unique_email}",
+        "status": "active",
     }).json()
     lead = _onboard(client, admin["headers"], _tag(unique_email, "lead"), "Team Lead", project_id=project["id"])
     client.post(f"{EMP_BASE}/projects/{project['id']}/team-lead", headers=admin["headers"],
@@ -59,6 +60,15 @@ def test_convert_action_item_creates_sprint_task(client, db, new_user, unique_em
     db.add(item)
     db.commit()
     meeting_id, item_id = meeting.id, item.id
+
+    # 4-state workflow: item starts as proposed, must be confirmed first
+    r_conf = client.post(
+        f"{MEETINGS_BASE}/{meeting_id}/action-items/{item_id}/confirm",
+        headers=lead["headers"],
+        json={"assignee_id": member["employee_id"], "due_date": "2026-01-10"},
+    )
+    assert r_conf.status_code == 200, r_conf.text
+    assert r_conf.json()["review_status"] == "confirmed"
 
     r = client.post(
         f"{MEETINGS_BASE}/{meeting_id}/action-items/{item_id}/convert",
@@ -92,6 +102,7 @@ def test_convert_requires_meeting_linked_to_a_project(client, db, new_user, uniq
     admin = new_user("Admin User")
     project = client.post(f"{EMP_BASE}/projects", headers=admin["headers"], json={
         "name": f"Project {unique_email}",
+        "status": "active",
     }).json()
     lead = _onboard(client, admin["headers"], _tag(unique_email, "lead"), "Team Lead", project_id=project["id"])
     client.post(f"{EMP_BASE}/projects/{project['id']}/team-lead", headers=admin["headers"],

@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
+from core.permissions import OVERRIDE_ROLES
 from models.employee import Employee
 from models.project import Project
 from models.sprint import Sprint
@@ -32,9 +33,12 @@ MANAGER_ONLY_TASK_FIELDS = {"title", "assignee_id", "due_date"}
 # ------------------------------------------------------------------ #
 
 def _is_manager(current_user: User, current_employee: Employee | None, project: Project) -> bool:
-    if current_user.role.name in ("admin", "hr_manager"):
+    role = getattr(current_user, "role", None)
+    role_name = getattr(role, "name", role)
+    if role_name in OVERRIDE_ROLES:
         return True
     return current_employee is not None and project.team_lead_id == current_employee.id
+
 
 
 def _is_project_member_or_manager(current_user: User, current_employee: Employee | None, project: Project) -> bool:
@@ -46,6 +50,26 @@ def _is_project_member_or_manager(current_user: User, current_employee: Employee
 # ------------------------------------------------------------------ #
 # Sprints
 # ------------------------------------------------------------------ #
+
+def _get_project_with_share_lock(db: Session, project_id: int) -> Project:
+    project = (
+        db.query(Project)
+        .filter(Project.id == project_id)
+        .with_for_update(read=True)
+        .first()
+    )
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Project id={project_id} not found.")
+    return project
+
+
+def _assert_project_active(project: Project) -> None:
+    if project.status != "active":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Cannot modify sprints or tasks for project in '{project.status}' status. Project must be 'active'.",
+        )
+
 
 def _get_project(db: Session, project_id: int) -> Project:
     project = db.query(Project).filter(Project.id == project_id).first()
@@ -62,9 +86,10 @@ def get_sprint(db: Session, sprint_id: int) -> Sprint:
 
 
 def create_sprint(db: Session, current_user: User, current_employee: Employee | None, payload) -> Sprint:
-    project = _get_project(db, payload.project_id)
+    project = _get_project_with_share_lock(db, payload.project_id)
     if not _is_manager(current_user, current_employee, project):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only this project's team lead (or admin/hr_manager) can create sprints.")
+    _assert_project_active(project)
     if payload.end_date < payload.start_date:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "end_date must be on or after start_date.")
 
@@ -96,9 +121,10 @@ def generate_weekly_sprints(db: Session, current_user: User, current_employee: E
     re-trigger, e.g. to fill the gap after a deadline is pushed out).
     Authorization wrapper around _generate_weekly_sprints_for_project —
     see that function for what it actually does."""
-    project = _get_project(db, project_id)
+    project = _get_project_with_share_lock(db, project_id)
     if not _is_manager(current_user, current_employee, project):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only this project's team lead (or admin/hr_manager) can generate sprints.")
+    _assert_project_active(project)
     if project.deadline is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "This project has no deadline set yet — set one first.")
     return _generate_weekly_sprints_for_project(db, project, current_employee)
@@ -195,9 +221,16 @@ def assert_can_view_sprint(db: Session, current_user: User, current_employee: Em
 
 
 def update_sprint(db: Session, current_user: User, current_employee: Employee | None, sprint_id: int, payload) -> Sprint:
-    sprint = get_sprint(db, sprint_id)
-    if not _is_manager(current_user, current_employee, sprint.project):
+    project_id = db.query(Sprint.project_id).filter(Sprint.id == sprint_id).scalar()
+    if project_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Sprint id={sprint_id} not found.")
+
+    project = _get_project_with_share_lock(db, project_id)
+    if not _is_manager(current_user, current_employee, project):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only this project's team lead (or admin/hr_manager) can edit sprints.")
+    _assert_project_active(project)
+
+    sprint = db.query(Sprint).filter(Sprint.id == sprint_id).with_for_update().first()
 
     data = payload.model_dump(exclude_unset=True)
     new_start = data.get("start_date", sprint.start_date)
@@ -241,15 +274,39 @@ def _task_query(db: Session):
     return db.query(SprintTask).options(joinedload(SprintTask.assignee).joinedload(Employee.user))
 
 
-def create_task(db: Session, current_user: User, current_employee: Employee | None, sprint_id: int, payload) -> dict:
+def _create_task_without_commit(
+    db: Session,
+    current_user: User,
+    current_employee: Employee | None,
+    sprint_id: int,
+    payload,
+    validate_project_id: int | None = None,
+) -> tuple[SprintTask, Sprint, Employee | None]:
+    project_id = db.query(Sprint.project_id).filter(Sprint.id == sprint_id).scalar()
+    if project_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Sprint id={sprint_id} not found.")
+
+    project = _get_project_with_share_lock(db, project_id)
+    _assert_project_active(project)
+
     sprint = get_sprint(db, sprint_id)
+    if sprint.status == "completed":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Cannot add tasks to a completed sprint.")
+
+    if validate_project_id is not None and sprint.project_id != validate_project_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "sprint_id must belong to this meeting's project.")
+
     if not _is_manager(current_user, current_employee, sprint.project):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Only this project's team lead (or admin/hr_manager) can create tasks.")
 
+    assignee = None
     if payload.assignee_id is not None:
-        assignee = db.query(Employee).filter(Employee.id == payload.assignee_id).first()
-        if assignee is None or assignee.project_id != sprint.project_id:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "assignee_id must be a member of this sprint's project.")
+        assignee = db.query(Employee).filter(
+            Employee.id == payload.assignee_id,
+            Employee.deleted_at.is_(None),
+        ).first()
+        if assignee is None or assignee.project_id != sprint.project_id or assignee.status != "active":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "assignee_id must be an active member of this sprint's project.")
 
     task = SprintTask(
         sprint_id=sprint.id,
@@ -261,11 +318,16 @@ def create_task(db: Session, current_user: User, current_employee: Employee | No
         progress_percent=0,
     )
     db.add(task)
+    db.flush()
+    return task, sprint, assignee
+
+
+def create_task(db: Session, current_user: User, current_employee: Employee | None, sprint_id: int, payload) -> dict:
+    task, sprint, assignee = _create_task_without_commit(db, current_user, current_employee, sprint_id, payload)
     db.commit()
     db.refresh(task)
 
-    if task.assignee_id is not None:
-        assignee = db.query(Employee).filter(Employee.id == task.assignee_id).first()
+    if assignee is not None:
         create_notification(
             db, assignee.user_id, "task_assigned",
             f"You were assigned '{task.title}' in sprint '{sprint.name}'.",
@@ -292,9 +354,19 @@ def list_my_tasks(db: Session, current_employee: Employee, status_filter: str | 
 
 
 def update_task(db: Session, current_user: User, current_employee: Employee | None, task_id: int, payload) -> dict:
-    task = _task_query(db).filter(SprintTask.id == task_id).first()
-    if task is None:
+    row = (
+        db.query(SprintTask.id, SprintTask.sprint_id, Sprint.project_id)
+        .join(Sprint, SprintTask.sprint_id == Sprint.id)
+        .filter(SprintTask.id == task_id)
+        .first()
+    )
+    if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Sprint task id={task_id} not found.")
+
+    project = _get_project_with_share_lock(db, row.project_id)
+    _assert_project_active(project)
+
+    task = db.query(SprintTask).filter(SprintTask.id == task_id).with_for_update().first()
     sprint = get_sprint(db, task.sprint_id)
 
     is_manager = _is_manager(current_user, current_employee, sprint.project)

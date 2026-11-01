@@ -10,7 +10,10 @@ from sqlalchemy.orm import Session
 
 from config.database import get_db
 from config.settings import settings
-from core.dependencies import get_current_user
+from typing import Optional
+from core.authorization import assert_can_link_project_meeting
+from core.dependencies import get_current_employee_optional, get_current_user
+from models.employee import Employee
 from models.meeting import Meeting
 from modules.meeting_online.schemas import ClientEvent, OnlineMeetingSession, StartMeeting
 from modules.meeting_online.service import service
@@ -26,7 +29,12 @@ router = APIRouter(prefix="/meetings/online", tags=["Online Meeting"], lifespan=
 
 
 @router.post("", response_model=OnlineMeetingSession, status_code=201)
-async def start_meeting(payload: StartMeeting, db: Session = Depends(get_db), user=Depends(get_current_user)):
+async def start_meeting(
+    payload: StartMeeting,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+    employee: Optional[Employee] = Depends(get_current_employee_optional),
+):
     project_id = payload.project_id
     linked_meeting_id = None
     if payload.meeting_id is not None:
@@ -37,6 +45,8 @@ async def start_meeting(payload: StartMeeting, db: Session = Depends(get_db), us
             raise HTTPException(409, "This meeting has already been started or isn't a scheduled booking.")
         linked_meeting_id = meeting.id
         project_id = meeting.project_id
+    if project_id is not None:
+        assert_can_link_project_meeting(db, project_id, user, employee)
     return service.create(user.id, payload, project_id=project_id, linked_meeting_id=linked_meeting_id)
 
 

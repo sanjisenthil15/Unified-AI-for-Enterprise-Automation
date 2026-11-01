@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from config.database import get_db
 from core.dependencies import get_current_employee, get_current_employee_optional, get_current_user, require_roles
+from core.permissions import SPRINT_MANAGE_ROLES
 from models.employee import Employee
 from models.user import User
 
@@ -110,12 +111,13 @@ def generate_weekly_sprints(
     return service.generate_weekly_sprints(db, current_user, current_employee, payload.project_id)
 
 
-@router.get("/overview", response_model=List[EnterpriseOverviewEntry], summary="Every project at a glance (admin / hr_manager only)")
+@router.get("/overview", response_model=List[EnterpriseOverviewEntry], summary="Every project at a glance (admin, hr_manager, manager)")
 def enterprise_overview(
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(["admin", "hr_manager"])),
+    _: User = Depends(require_roles(SPRINT_MANAGE_ROLES)),
 ):
     return service.build_enterprise_overview(db)
+
 
 
 @router.get("/{sprint_id}", response_model=SprintResponse, summary="Get one sprint")

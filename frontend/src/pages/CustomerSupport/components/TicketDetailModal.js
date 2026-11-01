@@ -81,6 +81,7 @@ export default function TicketDetailModal({
                 className="cs-status-select"
               >
                 <option value="open">OPEN</option>
+                <option value="assigned">ASSIGNED</option>
                 <option value="in_progress">IN PROGRESS</option>
                 <option value="waiting_for_customer">WAITING FOR CUSTOMER</option>
                 <option value="escalated">ESCALATED</option>

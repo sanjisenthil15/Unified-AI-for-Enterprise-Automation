@@ -19,11 +19,11 @@ import math
 import os
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, cast, String
 from sqlalchemy.orm import Session, joinedload
 
 from config.settings import settings
@@ -38,6 +38,12 @@ from models.ticket import (
     TicketMessage,
 )
 from models.user import User
+from models.notification import Notification
+from models.support_notification_preference import (
+    SupportNotificationPreference,
+    SUPPORT_PREFERENCE_FIELDS,
+)
+from modules.notifications.service import create_notification
 from modules.customer_support.chunking import (
     DEFAULT_MAX_CHUNK_CHARS,
     DEFAULT_MIN_CHUNK_CHARS,
@@ -2012,105 +2018,212 @@ def create_support_ticket(
     submitted_by_id: Optional[int] = 1,
 ) -> TicketResponse:
     now = datetime.now(timezone.utc)
-    new_ticket_id = 1000 + len(dev_store.tickets) + 1
 
-    team_id = payload.team_id
-    if not team_id and payload.category_id:
-        cat = next((c for c in dev_store.categories if c["id"] == payload.category_id), None)
-        if cat:
-            team_id = cat.get("default_team_id")
-    if not team_id:
-        team_id = 1
-
-    sla_status, sla_time_remaining = compute_ticket_sla(now, payload.priority, "open")
-
-    ticket_data = {
-        "id": new_ticket_id,
-        "session_id": payload.session_id,
-        "category_id": payload.category_id or 1,
-        "team_id": team_id,
-        "submitted_by": submitted_by_id or 1,
-        "assigned_to": None,
-        "customer_name": payload.customer_name or "Enterprise Customer",
-        "customer_email": str(payload.customer_email) if payload.customer_email else "user@enterprise.ai",
-        "subject": payload.subject.strip(),
-        "description": payload.description.strip(),
-        "priority": payload.priority,
-        "status": "open",
-        "channel": payload.channel,
-        "escalation_reason": "Escalated from enterprise customer support portal",
-        "ai_summary": f"Automated ticket created for {payload.subject[:100]}. Route to team ID #{team_id}.",
-        "resolved_at": None,
-        "created_at": now,
-        "updated_at": now,
-        "messages": [
-            {
-                "id": 1,
-                "ticket_id": new_ticket_id,
-                "sender_id": submitted_by_id or 1,
-                "sender_name": "Dev Admin",
-                "message": f"Support Ticket opened: {payload.subject.strip()}",
-                "is_ai": False,
-                "ai_model": None,
-                "created_at": now,
-            }
-        ]
-    }
-
-    dev_store.tickets.insert(0, ticket_data)
-
-    if payload.session_id and payload.session_id in dev_store.sessions:
-        dev_store.sessions[payload.session_id]["ticket_id"] = new_ticket_id
-
-    if _is_db_available(db):
-        try:
-            t = SupportTicket(
-                session_id=payload.session_id,
-                category_id=payload.category_id,
-                team_id=team_id,
-                submitted_by=submitted_by_id or 1,
-                customer_name=payload.customer_name,
-                customer_email=str(payload.customer_email) if payload.customer_email else None,
-                subject=payload.subject.strip(),
-                description=payload.description.strip(),
-                priority=payload.priority,
-                status="open",
-                channel=payload.channel,
-                ai_summary=ticket_data["ai_summary"],
+    # 1. Team ID validation - do NOT invent default teams
+    team_id = None
+    if payload.team_id is not None:
+        team = db.query(SupportTeam).filter(SupportTeam.id == payload.team_id).first()
+        if team is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Support team id={payload.team_id} does not exist.",
             )
-            db.add(t)
-            db.commit()
-            db.refresh(t)
-            new_ticket_id = t.id
-        except Exception:
-            pass
+        team_id = payload.team_id
+    elif payload.category_id is not None:
+        cat = db.query(SupportCategory).filter(SupportCategory.id == payload.category_id).first()
+        if cat and cat.default_team_id:
+            def_team = db.query(SupportTeam).filter(SupportTeam.id == cat.default_team_id).first()
+            if def_team:
+                team_id = def_team.id
 
-    return TicketResponse(
-        id=new_ticket_id,
-        session_id=payload.session_id,
-        category_id=payload.category_id,
+    # 2. Category ID validation
+    category_id = None
+    if payload.category_id is not None:
+        cat = db.query(SupportCategory).filter(SupportCategory.id == payload.category_id).first()
+        if cat is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Support category id={payload.category_id} does not exist.",
+            )
+        category_id = payload.category_id
+
+    # 3. Session ID validation (ensure FK won't fail if session not in DB)
+    session_id = None
+    if payload.session_id:
+        sess = db.query(ChatSession).filter(ChatSession.id == payload.session_id).first()
+        if sess is not None:
+            session_id = payload.session_id
+
+    # 4. Resolve customer info from user if not explicitly given
+    sub_user = db.query(User).filter(User.id == submitted_by_id).first() if submitted_by_id else None
+    customer_name = payload.customer_name or (sub_user.full_name if sub_user else "Enterprise Customer")
+    customer_email = str(payload.customer_email) if payload.customer_email else (sub_user.email if sub_user else "user@enterprise.ai")
+
+    # 5. Idempotent duplicate check: avoid duplicate tickets on fast retry
+    recent_cutoff = now - timedelta(seconds=60)
+    existing_duplicate = (
+        db.query(SupportTicket)
+        .filter(
+            SupportTicket.submitted_by == (submitted_by_id or 1),
+            SupportTicket.subject == payload.subject.strip(),
+            SupportTicket.description == payload.description.strip(),
+            SupportTicket.created_at >= recent_cutoff,
+        )
+        .first()
+    )
+    if existing_duplicate is not None:
+        c_at = existing_duplicate.created_at or now
+        sla_stat, sla_rem = compute_ticket_sla(c_at, existing_duplicate.priority, existing_duplicate.status)
+        return TicketResponse(
+            id=existing_duplicate.id,
+            session_id=existing_duplicate.session_id,
+            category_id=existing_duplicate.category_id,
+            team_id=existing_duplicate.team_id,
+            submitted_by=existing_duplicate.submitted_by,
+            assigned_to=existing_duplicate.assigned_to,
+            customer_name=existing_duplicate.customer_name,
+            customer_email=existing_duplicate.customer_email,
+            subject=existing_duplicate.subject,
+            description=existing_duplicate.description,
+            priority=existing_duplicate.priority,
+            status=existing_duplicate.status,
+            channel=existing_duplicate.channel,
+            escalation_reason=existing_duplicate.escalation_reason,
+            ai_summary=existing_duplicate.ai_summary,
+            sla_status=sla_stat,
+            sla_time_remaining=sla_rem,
+            resolved_at=existing_duplicate.resolved_at,
+            created_at=c_at,
+            updated_at=existing_duplicate.updated_at or c_at,
+        )
+
+    # 6. Build and persist ticket to PostgreSQL database
+    ai_summary = f"Automated ticket created for {payload.subject.strip()[:100]}."
+    if team_id:
+        ai_summary += f" Route to team ID #{team_id}."
+
+    t = SupportTicket(
+        session_id=session_id,
+        category_id=category_id,
         team_id=team_id,
-        submitted_by=submitted_by_id or 1,
+        submitted_by=submitted_by_id or (sub_user.id if sub_user else 1),
         assigned_to=None,
-        customer_name=ticket_data["customer_name"],
-        customer_email=ticket_data["customer_email"],
-        subject=ticket_data["subject"],
-        description=ticket_data["description"],
+        customer_name=customer_name,
+        customer_email=customer_email,
+        subject=payload.subject.strip(),
+        description=payload.description.strip(),
         priority=payload.priority,
         status="open",
         channel=payload.channel,
-        escalation_reason=ticket_data["escalation_reason"],
-        ai_summary=ticket_data["ai_summary"],
+        escalation_reason="Escalated from enterprise customer support portal" if session_id else "Submitted via customer support portal",
+        ai_summary=ai_summary,
+    )
+
+    try:
+        db.add(t)
+        db.commit()
+        db.refresh(t)
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"Failed to persist support ticket: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database persistence failed for support ticket.",
+        )
+
+    # 7. Add initial message to thread in database
+    try:
+        init_msg = TicketMessage(
+            ticket_id=t.id,
+            sender_id=t.submitted_by,
+            message=f"Support Ticket opened: {payload.subject.strip()}",
+            is_ai=False,
+            ai_model=None,
+        )
+        db.add(init_msg)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning(f"Could not persist initial ticket message: {exc}")
+
+    # 8. Synchronize dev_store for in-memory fallbacks
+    ticket_dict = {
+        "id": t.id,
+        "session_id": t.session_id,
+        "category_id": t.category_id,
+        "team_id": t.team_id,
+        "submitted_by": t.submitted_by,
+        "assigned_to": t.assigned_to,
+        "customer_name": t.customer_name,
+        "customer_email": t.customer_email,
+        "subject": t.subject,
+        "description": t.description,
+        "priority": t.priority,
+        "status": t.status,
+        "channel": t.channel,
+        "escalation_reason": t.escalation_reason,
+        "ai_summary": t.ai_summary,
+        "resolved_at": t.resolved_at,
+        "created_at": t.created_at,
+        "updated_at": t.updated_at,
+        "messages": [
+            {
+                "id": 1,
+                "ticket_id": t.id,
+                "sender_id": t.submitted_by,
+                "sender_name": customer_name,
+                "message": f"Support Ticket opened: {payload.subject.strip()}",
+                "is_ai": False,
+                "ai_model": None,
+                "created_at": t.created_at,
+            }
+        ],
+    }
+    dev_store.tickets.insert(0, ticket_dict)
+    if payload.session_id and payload.session_id in dev_store.sessions:
+        dev_store.sessions[payload.session_id]["ticket_id"] = t.id
+
+    c_at = t.created_at or now
+    sla_status, sla_time_remaining = compute_ticket_sla(c_at, t.priority, t.status)
+
+    return TicketResponse(
+        id=t.id,
+        session_id=t.session_id,
+        category_id=t.category_id,
+        team_id=t.team_id,
+        submitted_by=t.submitted_by,
+        assigned_to=t.assigned_to,
+        customer_name=t.customer_name,
+        customer_email=t.customer_email,
+        subject=t.subject,
+        description=t.description,
+        priority=t.priority,
+        status=t.status,
+        channel=t.channel,
+        escalation_reason=t.escalation_reason,
+        ai_summary=t.ai_summary,
         sla_status=sla_status,
         sla_time_remaining=sla_time_remaining,
-        resolved_at=None,
-        created_at=now,
-        updated_at=now,
+        resolved_at=t.resolved_at,
+        created_at=c_at,
+        updated_at=t.updated_at or c_at,
     )
+
+
+def _user_has_full_ticket_access(user: Optional[Any]) -> bool:
+    if user is None:
+        return False
+    role = getattr(user, "role", None)
+    role_name = getattr(role, "name", role)
+    if isinstance(role_name, str):
+        return role_name.lower() in ("admin", "support_agent")
+    return False
+
 
 
 def list_support_tickets(
     db: Session,
+    current_user: Optional[Any] = None,
     status_filter: Optional[str] = None,
     priority_filter: Optional[str] = None,
     category_id: Optional[int] = None,
@@ -2118,154 +2231,351 @@ def list_support_tickets(
     skip: int = 0,
     limit: int = 50,
 ) -> List[TicketListItem]:
-    cat_map = {c["id"]: c["name"] for c in dev_store.categories}
-    team_map = {t["id"]: t["name"] for t in dev_store.teams}
+    has_full_access = _user_has_full_ticket_access(current_user)
+    user_id = getattr(current_user, "id", None)
+    user_email = getattr(current_user, "email", None)
 
-    results: List[TicketListItem] = []
-    for t in dev_store.tickets:
-        if status_filter and status_filter.upper() != "ALL" and t.get("status", "").lower() != status_filter.lower():
-            continue
-        if priority_filter and priority_filter.upper() != "ALL" and t.get("priority", "").lower() != priority_filter.lower():
-            continue
-        if category_id and t.get("category_id") != category_id:
-            continue
-        if search:
-            q = search.lower()
-            subject_match = q in t.get("subject", "").lower()
-            id_match = q in str(t.get("id"))
-            cust_match = q in t.get("customer_name", "").lower()
-            if not (subject_match or id_match or cust_match):
-                continue
+    # 1. Query PostgreSQL database
+    query = db.query(SupportTicket).options(
+        joinedload(SupportTicket.category),
+        joinedload(SupportTicket.team),
+    )
 
-        c_at = t.get("created_at") or datetime.now(timezone.utc)
-        sla_stat, sla_rem = compute_ticket_sla(c_at, t.get("priority", "medium"), t.get("status", "open"))
+    if not has_full_access:
+        filters = []
+        if user_id is not None:
+            filters.append(SupportTicket.submitted_by == user_id)
+        if user_email:
+            filters.append(SupportTicket.customer_email == user_email)
+        if filters:
+            query = query.filter(or_(*filters))
+        else:
+            return []
 
-        results.append(
-            TicketListItem(
-                id=t["id"],
-                subject=t["subject"],
-                priority=t["priority"],
-                status=t["status"],
-                channel=t.get("channel", "chat"),
-                category_id=t.get("category_id"),
-                category_name=cat_map.get(t.get("category_id"), "General Inquiry"),
-                team_id=t.get("team_id"),
-                team_name=team_map.get(t.get("team_id"), "General Support Team"),
-                customer_name=t.get("customer_name"),
-                customer_email=t.get("customer_email"),
-                assigned_agent_name=None,
-                sla_status=sla_stat,
-                sla_time_remaining=sla_rem,
-                created_at=c_at,
-                updated_at=t.get("updated_at") or c_at,
+    if status_filter and status_filter.upper() != "ALL":
+        query = query.filter(SupportTicket.status == status_filter.lower())
+    if priority_filter and priority_filter.upper() != "ALL":
+        query = query.filter(SupportTicket.priority == priority_filter.lower())
+    if category_id:
+        query = query.filter(SupportTicket.category_id == category_id)
+    if search:
+        q = f"%{search.lower()}%"
+        query = query.filter(
+            or_(
+                func.lower(SupportTicket.subject).like(q),
+                func.lower(SupportTicket.customer_name).like(q),
+                cast(SupportTicket.id, String).like(q),
             )
         )
 
-    return results[skip : skip + limit]
+    db_tickets = query.order_by(SupportTicket.created_at.desc()).offset(skip).limit(limit).all()
 
-
-def get_support_ticket(db: Session, ticket_id: int) -> TicketDetailResponse:
-    t_dict = next((t for t in dev_store.tickets if t["id"] == ticket_id), None)
-    if not t_dict:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ticket id={ticket_id} not found.")
-
-    cat_dict = next((c for c in dev_store.categories if c["id"] == t_dict.get("category_id")), None)
-    team_dict = next((tm for tm in dev_store.teams if tm["id"] == t_dict.get("team_id")), None)
-
-    msgs = [TicketMessageResponse(**m) for m in t_dict.get("messages", [])]
-    transcript = []
-    if t_dict.get("session_id"):
-        for m in dev_store.messages:
-            if m["session_id"] == t_dict["session_id"]:
-                transcript.append(
-                    ChatMessageResponse(
-                        id=m["id"],
-                        session_id=m["session_id"],
-                        sender_type=m["sender_type"],
-                        sender_id=m.get("sender_id"),
-                        message=m["message"],
-                        confidence_score=m.get("confidence_score"),
-                        is_escalated=m.get("is_escalated", False),
-                        created_at=m["created_at"],
-                    )
+    if db_tickets:
+        results: List[TicketListItem] = []
+        for t in db_tickets:
+            c_at = t.created_at or datetime.now(timezone.utc)
+            sla_stat, sla_rem = compute_ticket_sla(c_at, t.priority, t.status)
+            results.append(
+                TicketListItem(
+                    id=t.id,
+                    subject=t.subject,
+                    priority=t.priority,
+                    status=t.status,
+                    channel=t.channel,
+                    category_id=t.category_id,
+                    category_name=t.category.name if t.category else "General Inquiry",
+                    team_id=t.team_id,
+                    team_name=t.team.name if t.team else "General Support Team",
+                    customer_name=t.customer_name,
+                    customer_email=t.customer_email,
+                    assigned_agent_name=None,
+                    sla_status=sla_stat,
+                    sla_time_remaining=sla_rem,
+                    created_at=c_at,
+                    updated_at=t.updated_at or c_at,
                 )
+            )
+        return results
 
-    c_at = t_dict.get("created_at") or datetime.now(timezone.utc)
-    sla_stat, sla_rem = compute_ticket_sla(c_at, t_dict.get("priority", "medium"), t_dict.get("status", "open"))
+    # No matching database tickets is a real, empty result — never fall
+    # back to the in-memory demo store, whose seeded sample tickets would
+    # then be presented as genuine.
+    return []
 
-    return TicketDetailResponse(
-        id=t_dict["id"],
-        session_id=t_dict.get("session_id"),
-        category_id=t_dict.get("category_id"),
-        team_id=t_dict.get("team_id"),
-        submitted_by=t_dict.get("submitted_by", 1),
-        assigned_to=t_dict.get("assigned_to"),
-        customer_name=t_dict.get("customer_name"),
-        customer_email=t_dict.get("customer_email"),
-        subject=t_dict["subject"],
-        description=t_dict["description"],
-        priority=t_dict["priority"],
-        status=t_dict["status"],
-        channel=t_dict.get("channel", "chat"),
-        escalation_reason=t_dict.get("escalation_reason"),
-        ai_summary=t_dict.get("ai_summary"),
-        sla_status=sla_stat,
-        sla_time_remaining=sla_rem,
-        resolved_at=t_dict.get("resolved_at"),
-        created_at=c_at,
-        updated_at=t_dict.get("updated_at") or c_at,
-        category=SupportCategoryResponse(**cat_dict) if cat_dict else None,
-        team=SupportTeamResponse(**team_dict) if team_dict else None,
-        messages=msgs,
-        chat_transcript=transcript if transcript else None,
+
+def get_support_ticket(db: Session, ticket_id: int, current_user: Optional[Any] = None) -> TicketDetailResponse:
+    t = (
+        db.query(SupportTicket)
+        .options(joinedload(SupportTicket.category), joinedload(SupportTicket.team))
+        .filter(SupportTicket.id == ticket_id)
+        .first()
     )
 
+    if t is not None:
+        if not _user_has_full_ticket_access(current_user):
+            user_id = getattr(current_user, "id", None)
+            user_email = getattr(current_user, "email", None)
+            is_owner = (user_id is not None and t.submitted_by == user_id) or (user_email and t.customer_email == user_email)
+            if not is_owner:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied. You can only view tickets submitted by you.",
+                )
 
-def update_support_ticket(db: Session, ticket_id: int, payload: TicketUpdateRequest) -> TicketDetailResponse:
-    t_dict = next((t for t in dev_store.tickets if t["id"] == ticket_id), None)
-    if not t_dict:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ticket id={ticket_id} not found.")
+        db_msgs = (
+            db.query(TicketMessage)
+            .options(joinedload(TicketMessage.sender))
+            .filter(TicketMessage.ticket_id == t.id)
+            .order_by(TicketMessage.created_at)
+            .all()
+        )
+        msgs = [
+            TicketMessageResponse(
+                id=m.id,
+                ticket_id=m.ticket_id,
+                sender_id=m.sender_id,
+                sender_name=m.sender.full_name if m.sender else ("Support Agent" if m.sender_id != t.submitted_by else t.customer_name),
+                message=m.message,
+                is_ai=m.is_ai,
+                ai_model=m.ai_model,
+                created_at=m.created_at,
+            )
+            for m in db_msgs
+        ]
 
-    now = datetime.now(timezone.utc)
-    if payload.status:
-        t_dict["status"] = payload.status
-        if payload.status == "resolved":
-            t_dict["resolved_at"] = now
-    if payload.priority:
-        t_dict["priority"] = payload.priority
-    if payload.assigned_to is not None:
-        t_dict["assigned_to"] = payload.assigned_to
-    if payload.category_id is not None:
-        t_dict["category_id"] = payload.category_id
-    if payload.team_id is not None:
-        t_dict["team_id"] = payload.team_id
-    t_dict["updated_at"] = now
+        c_at = t.created_at or datetime.now(timezone.utc)
+        sla_stat, sla_rem = compute_ticket_sla(c_at, t.priority, t.status)
 
-    return get_support_ticket(db, ticket_id)
+        cat_resp = (
+            SupportCategoryResponse(
+                id=t.category.id,
+                name=t.category.name,
+                description=t.category.description,
+                default_team_id=t.category.default_team_id,
+                created_at=t.category.created_at,
+            )
+            if t.category
+            else None
+        )
+        team_resp = (
+            SupportTeamResponse(
+                id=t.team.id,
+                name=t.team.name,
+                code=t.team.code,
+                description=t.team.description,
+                is_active=t.team.is_active,
+                created_at=t.team.created_at,
+            )
+            if t.team
+            else None
+        )
+
+        return TicketDetailResponse(
+            id=t.id,
+            session_id=t.session_id,
+            category_id=t.category_id,
+            team_id=t.team_id,
+            submitted_by=t.submitted_by,
+            assigned_to=t.assigned_to,
+            customer_name=t.customer_name,
+            customer_email=t.customer_email,
+            subject=t.subject,
+            description=t.description,
+            priority=t.priority,
+            status=t.status,
+            channel=t.channel,
+            escalation_reason=t.escalation_reason,
+            ai_summary=t.ai_summary,
+            sla_status=sla_stat,
+            sla_time_remaining=sla_rem,
+            resolved_at=t.resolved_at,
+            created_at=c_at,
+            updated_at=t.updated_at or c_at,
+            category=cat_resp,
+            team=team_resp,
+            messages=msgs,
+            chat_transcript=None,
+        )
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ticket id={ticket_id} not found.")
+
+
+def _notify_ticket_owner(
+    db: Session,
+    ticket: dict,
+    actor: Optional[Any],
+    pref_field: str,
+    type: str,
+    message: str,
+) -> None:
+    owner_id = ticket.get("submitted_by")
+    if not owner_id:
+        return
+    actor_id = getattr(actor, "id", None)
+    if actor_id is not None and actor_id == owner_id:
+        return
+    try:
+        owner = db.query(User).filter(User.id == owner_id).first()
+        if not owner:
+            return
+        pref = (
+            db.query(SupportNotificationPreference)
+            .filter(SupportNotificationPreference.user_id == owner_id)
+            .first()
+        )
+        if pref is not None and not getattr(pref, pref_field, True):
+            return
+        create_notification(
+            db=db,
+            user_id=owner_id,
+            type=type,
+            message=message,
+            link=f"/customer-support?ticket_id={ticket.get('id')}",
+            category="support",
+            entity_type="support_ticket",
+            entity_id=ticket.get("id"),
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to deliver customer support notification: {exc}")
+
+
+def update_support_ticket(
+    db: Session,
+    ticket_id: int,
+    payload: TicketUpdateRequest,
+    current_user: Optional[Any] = None,
+) -> TicketDetailResponse:
+    t = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
+    if t is not None:
+        if not _user_has_full_ticket_access(current_user):
+            user_id = getattr(current_user, "id", None)
+            user_email = getattr(current_user, "email", None)
+            is_owner = (user_id is not None and t.submitted_by == user_id) or (user_email and t.customer_email == user_email)
+            if not is_owner:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied. You cannot update tickets submitted by others.",
+                )
+
+        now = datetime.now(timezone.utc)
+        old_status = t.status
+        if payload.status:
+            t.status = payload.status
+            if payload.status == "resolved":
+                t.resolved_at = now
+            if payload.status != old_status:
+                notif_type = "support_resolution" if payload.status == "resolved" else "support_ticket_update"
+                _notify_ticket_owner(
+                    db=db,
+                    ticket={"id": t.id, "submitted_by": t.submitted_by, "customer_email": t.customer_email},
+                    actor=current_user,
+                    pref_field="ticket_updates",
+                    type=notif_type,
+                    message=f"Ticket #TKT-{t.id} status updated to {payload.status.replace('_', ' ').title()}.",
+                )
+        if payload.priority:
+            t.priority = payload.priority
+        if payload.assigned_to is not None:
+            t.assigned_to = payload.assigned_to
+        if payload.category_id is not None:
+            cat = db.query(SupportCategory).filter(SupportCategory.id == payload.category_id).first()
+            if not cat:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Category id={payload.category_id} not found.")
+            t.category_id = payload.category_id
+        if payload.team_id is not None:
+            team = db.query(SupportTeam).filter(SupportTeam.id == payload.team_id).first()
+            if not team:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Support team id={payload.team_id} not found.")
+            t.team_id = payload.team_id
+        t.updated_at = now
+        db.commit()
+        db.refresh(t)
+
+        t_dict = next((item for item in dev_store.tickets if item["id"] == ticket_id), None)
+        if t_dict:
+            t_dict["status"] = t.status
+            t_dict["priority"] = t.priority
+            t_dict["updated_at"] = now
+            if t.status == "resolved":
+                t_dict["resolved_at"] = now
+
+        return get_support_ticket(db, ticket_id, current_user=current_user)
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ticket id={ticket_id} not found.")
 
 
 def add_ticket_message(
-    db: Session, ticket_id: int, payload: TicketMessageRequest, sender_id: Optional[int] = 1
+    db: Session,
+    ticket_id: int,
+    payload: TicketMessageRequest,
+    sender_id: Optional[int] = 1,
+    current_user: Optional[Any] = None,
 ) -> TicketMessageResponse:
-    t_dict = next((t for t in dev_store.tickets if t["id"] == ticket_id), None)
-    if not t_dict:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ticket id={ticket_id} not found.")
-
+    t = db.query(SupportTicket).filter(SupportTicket.id == ticket_id).first()
     now = datetime.now(timezone.utc)
-    new_msg_id = len(t_dict.get("messages", [])) + 1
-    new_msg = {
-        "id": new_msg_id,
-        "ticket_id": ticket_id,
-        "sender_id": sender_id or 1,
-        "sender_name": "Dev Admin" if sender_id == 1 else "Support Specialist",
-        "message": payload.message.strip(),
-        "is_ai": payload.is_ai,
-        "ai_model": "Enterprise Grounded Model" if payload.is_ai else None,
-        "created_at": now,
-    }
-    t_dict.setdefault("messages", []).append(new_msg)
-    t_dict["updated_at"] = now
-    return TicketMessageResponse(**new_msg)
+
+    if t is not None:
+        if not _user_has_full_ticket_access(current_user):
+            user_id = getattr(current_user, "id", None)
+            user_email = getattr(current_user, "email", None)
+            is_owner = (user_id is not None and t.submitted_by == user_id) or (user_email and t.customer_email == user_email)
+            if not is_owner:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied. You cannot reply to tickets submitted by others.",
+                )
+
+        sender_user = db.query(User).filter(User.id == sender_id).first() if sender_id else None
+        sender_name = sender_user.full_name if sender_user else ("Dev Admin" if sender_id == 1 else "Support Specialist")
+
+        new_msg = TicketMessage(
+            ticket_id=t.id,
+            sender_id=sender_id or (current_user.id if current_user else 1),
+            message=payload.message.strip(),
+            is_ai=payload.is_ai,
+            ai_model="Enterprise Grounded Model" if payload.is_ai else None,
+            created_at=now,
+        )
+        db.add(new_msg)
+        t.updated_at = now
+        db.commit()
+        db.refresh(new_msg)
+
+        _notify_ticket_owner(
+            db=db,
+            ticket={"id": t.id, "submitted_by": t.submitted_by, "customer_email": t.customer_email},
+            actor=current_user,
+            pref_field="agent_replies",
+            type="support_agent_reply",
+            message=f"New reply on ticket #TKT-{t.id}: {payload.message.strip()[:100]}",
+        )
+
+        t_dict = next((item for item in dev_store.tickets if item["id"] == ticket_id), None)
+        if t_dict:
+            t_dict.setdefault("messages", []).append({
+                "id": new_msg.id,
+                "ticket_id": t.id,
+                "sender_id": new_msg.sender_id,
+                "sender_name": sender_name,
+                "message": new_msg.message,
+                "is_ai": new_msg.is_ai,
+                "ai_model": new_msg.ai_model,
+                "created_at": now,
+            })
+            t_dict["updated_at"] = now
+
+        return TicketMessageResponse(
+            id=new_msg.id,
+            ticket_id=new_msg.ticket_id,
+            sender_id=new_msg.sender_id,
+            sender_name=sender_name,
+            message=new_msg.message,
+            is_ai=new_msg.is_ai,
+            ai_model=new_msg.ai_model,
+            created_at=new_msg.created_at,
+        )
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Ticket id={ticket_id} not found.")
 
 
 def escalate_chat_to_ticket(
@@ -2408,13 +2718,18 @@ def create_support_team(db: Session, payload: SupportTeamCreate) -> SupportTeamR
 
 
 def get_customer_support_stats(db: Session) -> CustomerSupportStats:
-    total_t = len(dev_store.tickets)
-    open_t = sum(1 for t in dev_store.tickets if t.get("status") in ["open", "in_progress", "assigned"])
-    esc_t = sum(1 for t in dev_store.tickets if t.get("status") == "escalated")
-    res_t = sum(1 for t in dev_store.tickets if t.get("status") in ["resolved", "closed"])
-    ai_resolved = max(1, sum(1 for s in dev_store.sessions.values() if s.get("status") == "resolved"))
-    active_s = sum(1 for s in dev_store.sessions.values() if s.get("status") == "active")
-    total_docs = len(dev_store.documents)
+    # Ticket and session figures come from the database only — the demo
+    # store's seeded sample tickets / sessions must never be counted.
+    total_t = db.query(func.count(SupportTicket.id)).scalar() or 0
+    open_t = db.query(func.count(SupportTicket.id)).filter(SupportTicket.status.in_(["open", "assigned", "in_progress"])).scalar() or 0
+    esc_t = db.query(func.count(SupportTicket.id)).filter(SupportTicket.status == "escalated").scalar() or 0
+    res_t = db.query(func.count(SupportTicket.id)).filter(SupportTicket.status.in_(["resolved", "closed"])).scalar() or 0
+
+    db_docs = db.query(func.count(KnowledgeDocument.id)).scalar() or 0
+    total_docs = max(db_docs, len(dev_store.documents))
+
+    active_s = db.query(func.count(ChatSession.id)).filter(ChatSession.status == "active").scalar() or 0
+    ai_resolved = db.query(func.count(ChatSession.id)).filter(ChatSession.status == "resolved").scalar() or 0
 
     return CustomerSupportStats(
         total_tickets=total_t,
@@ -2427,15 +2742,24 @@ def get_customer_support_stats(db: Session) -> CustomerSupportStats:
     )
 
 
-def global_customer_support_search(db: Session, query: str, limit: int = 15) -> GlobalSearchResponse:
+def global_customer_support_search(
+    db: Session,
+    query: str,
+    current_user: Optional[Any] = None,
+    skip: int = 0,
+    limit: int = 15,
+) -> GlobalSearchResponse:
     cleaned = query.lower().strip()
     if not cleaned:
         return GlobalSearchResponse(query=query, total_results=0, results=[])
 
     results: List[GlobalSearchItem] = []
+    has_full_access = _user_has_full_ticket_access(current_user)
 
-    # 1. Search KB
+    # 1. Search KB (hide unpublished from non-admin/support)
     for d in dev_store.documents:
+        if not has_full_access and not d.get("is_published", True):
+            continue
         if cleaned in d["title"].lower() or cleaned in d["content"].lower():
             results.append(
                 GlobalSearchItem(
@@ -2450,51 +2774,59 @@ def global_customer_support_search(db: Session, query: str, limit: int = 15) -> 
                 )
             )
 
-    # 2. Search Tickets
-    for t in dev_store.tickets:
-        if cleaned in t["subject"].lower() or cleaned in t["description"].lower() or cleaned in str(t["id"]):
-            results.append(
-                GlobalSearchItem(
-                    id=f"tkt_{t['id']}",
-                    title=f"#TKT-{t['id']} {t['subject']}",
-                    type="ticket",
-                    snippet=t["description"][:160] + "...",
-                    status=t["status"].upper(),
-                    category_name=t.get("priority", "medium").upper(),
-                    score=0.90,
-                    url=f"/customer-support/tickets/{t['id']}",
-                )
-            )
+    # 2. Search Tickets (PostgreSQL DB first with RBAC)
+    user_id = getattr(current_user, "id", None)
+    user_email = getattr(current_user, "email", None)
 
-    # 3. Search Categories
-    for c in dev_store.categories:
-        if cleaned in c["name"].lower() or cleaned in (c.get("description") or "").lower():
-            results.append(
-                GlobalSearchItem(
-                    id=f"cat_{c['id']}",
-                    title=c["name"],
-                    type="category",
-                    snippet=c.get("description"),
-                    status="Category",
-                    category_name=c["name"],
-                    score=0.85,
-                    url=None,
-                )
-            )
+    seen_ticket_ids = set()
+    t_query = db.query(SupportTicket).options(joinedload(SupportTicket.category))
+    if not has_full_access:
+        filters = []
+        if user_id is not None:
+            filters.append(SupportTicket.submitted_by == user_id)
+        if user_email:
+            filters.append(SupportTicket.customer_email == user_email)
+        if filters:
+            t_query = t_query.filter(or_(*filters))
+        else:
+            t_query = t_query.filter(False)
 
-    return GlobalSearchResponse(
-        query=query,
-        total_results=len(results),
-        results=results[:limit],
+    q_filter = f"%{cleaned}%"
+    t_query = t_query.filter(
+        or_(
+            func.lower(SupportTicket.subject).like(q_filter),
+            func.lower(SupportTicket.description).like(q_filter),
+            cast(SupportTicket.id, String) == cleaned,
+        )
     )
+    for t in t_query.all():
+        seen_ticket_ids.add(t.id)
+        results.append(
+            GlobalSearchItem(
+                id=f"tkt_{t.id}",
+                title=f"Ticket #TKT-{t.id}: {t.subject}",
+                type="ticket",
+                snippet=t.description[:140] + "...",
+                status=t.status.upper(),
+                category_name=t.category.name if t.category else "General",
+                score=0.90,
+                url=f"/customer-support/tickets/{t.id}",
+            )
+        )
+
+    total_count = len(results)
+    paged = results[skip : skip + limit]
+    return GlobalSearchResponse(query=query, total_results=total_count, results=paged)
+
+
+
 
 
 # =============================================================================
-# 11. ENTERPRISE SERVICE STATUS & INCIDENT SERVICES
+# 11. ENTERPRISE SERVICE STATUS & INCIDENTS
 # =============================================================================
 
 def get_service_statuses(db: Session) -> ServiceStatusOverviewResponse:
-    """Returns real-time service operational health and active/past incidents."""
     services = [EnterpriseServiceStatusItem(**s) for s in dev_store.services]
     active_incidents = [
         ServiceIncidentItem(
@@ -2505,8 +2837,8 @@ def get_service_statuses(db: Session) -> ServiceStatusOverviewResponse:
             status=inc["status"],
             started_at=inc["started_at"],
             resolved_at=inc.get("resolved_at"),
-            impact=inc["impact"],
-            latest_update=inc["latest_update"],
+            impact=inc.get("impact") or inc.get("summary") or "",
+            latest_update=inc.get("latest_update", "Investigating"),
             timeline=[IncidentUpdateItem(**t) for t in inc.get("timeline", [])],
         )
         for inc in dev_store.incidents
@@ -2521,17 +2853,15 @@ def get_service_statuses(db: Session) -> ServiceStatusOverviewResponse:
             status=inc["status"],
             started_at=inc["started_at"],
             resolved_at=inc.get("resolved_at"),
-            impact=inc["impact"],
-            latest_update=inc["latest_update"],
+            impact=inc.get("impact") or inc.get("summary") or "",
+            latest_update=inc.get("latest_update", "Resolved"),
             timeline=[IncidentUpdateItem(**t) for t in inc.get("timeline", [])],
         )
         for inc in dev_store.incidents
         if inc.get("status") == "resolved"
     ]
-
     has_degraded = any(s.status != "operational" for s in services) or len(active_incidents) > 0
     overall = "Partial Service Degradation" if has_degraded else "All Systems Operational"
-
     return ServiceStatusOverviewResponse(
         overall_status=overall,
         services=services,
@@ -2543,19 +2873,14 @@ def get_service_statuses(db: Session) -> ServiceStatusOverviewResponse:
 
 
 def get_active_incidents(db: Session) -> List[ServiceIncidentItem]:
-    """Returns currently ongoing service incidents."""
     overview = get_service_statuses(db)
     return overview.active_incidents
 
 
 def get_incident_detail(db: Session, incident_id: str) -> ServiceIncidentItem:
-    """Fetches full diagnostic detail and update timeline for a specific incident."""
     inc = next((i for i in dev_store.incidents if i["id"].lower() == incident_id.lower()), None)
     if not inc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Incident '{incident_id}' not found.",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Incident '{incident_id}' not found.")
     return ServiceIncidentItem(
         id=inc["id"],
         title=inc["title"],
@@ -2564,8 +2889,8 @@ def get_incident_detail(db: Session, incident_id: str) -> ServiceIncidentItem:
         status=inc["status"],
         started_at=inc["started_at"],
         resolved_at=inc.get("resolved_at"),
-        impact=inc["impact"],
-        latest_update=inc["latest_update"],
+        impact=inc.get("impact") or inc.get("summary") or "",
+        latest_update=inc.get("latest_update", ""),
         timeline=[IncidentUpdateItem(**t) for t in inc.get("timeline", [])],
     )
 
@@ -2575,17 +2900,9 @@ def get_incident_detail(db: Session, incident_id: str) -> ServiceIncidentItem:
 # =============================================================================
 
 def analyze_support_request(db: Session, payload: SupportRequestAnalysisRequest) -> SupportRequestAnalysisResponse:
-    """
-    AI-Assisted Pre-Submission Analysis Engine:
-    1. Analyzes customer's subject & problem description.
-    2. Determines detected category, recommended team, and suggested priority.
-    3. Searches knowledge base for instant self-serve resolution article.
-    4. Evaluates active open tickets for potential duplicates to prevent double triage.
-    """
     combined_text = f"{payload.subject} {payload.description}"
     intent = detect_query_intent(combined_text)
 
-    # Find matching category id
     category_id = payload.category_id
     if not category_id:
         matched_cat = next(
@@ -2594,7 +2911,6 @@ def analyze_support_request(db: Session, payload: SupportRequestAnalysisRequest)
         )
         category_id = matched_cat["id"] if matched_cat else 1
 
-    # Suggested Priority
     priority = "medium"
     lower_comb = combined_text.lower()
     if any(w in lower_comb for w in ["500", "outage", "critical", "blocked", "emergency", "production down"]):
@@ -2604,14 +2920,9 @@ def analyze_support_request(db: Session, payload: SupportRequestAnalysisRequest)
     elif any(w in lower_comb for w in ["profile", "documentation", "feedback", "how to"]):
         priority = "low"
 
-    # AI Summary
     clean_desc = payload.description.strip().replace("\n", " ")
-    if len(clean_desc) > 160:
-        ai_summary = clean_desc[:160] + "..."
-    else:
-        ai_summary = clean_desc
+    ai_summary = clean_desc[:160] + "..." if len(clean_desc) > 160 else clean_desc
 
-    # Relevant Knowledge Document for 1-click self-service
     kb_res = search_knowledge_base(db, query=combined_text, limit=1, intent=intent)
     relevant_doc_title = None
     relevant_doc_excerpt = None
@@ -2619,27 +2930,28 @@ def analyze_support_request(db: Session, payload: SupportRequestAnalysisRequest)
         relevant_doc_title = kb_res.results[0].document_title
         relevant_doc_excerpt = kb_res.results[0].chunk_text[:240] + "..."
 
-    # Duplicate Request Detection against open/in-progress tickets
     duplicate_alert = None
-    open_tickets = [t for t in dev_store.tickets if t.get("status") in ["open", "in_progress", "escalated", "assigned"]]
-    
+    # Check duplicate in DB first
+    open_db_tickets = (
+        db.query(SupportTicket)
+        .filter(SupportTicket.status.in_(["open", "assigned", "in_progress", "waiting_for_customer", "escalated"]))
+        .all()
+    )
     subject_words = set(re.findall(r"\w{4,}", payload.subject.lower()))
-    for t in open_tickets:
-        t_sub_words = set(re.findall(r"\w{4,}", t.get("subject", "").lower()))
+    for t in open_db_tickets:
+        t_sub_words = set(re.findall(r"\w{4,}", t.subject.lower()))
         common_words = subject_words & t_sub_words
-        same_category = t.get("category_id") == category_id
-        
-        # Match condition: overlap of significant subject words or exact domain match
+        same_category = t.category_id == category_id
         if len(common_words) >= 2 or (same_category and ("recharge" in lower_comb or "refund" in lower_comb or "500" in lower_comb)):
-            team_name = next((tm["name"] for tm in dev_store.teams if tm["id"] == t.get("team_id")), "Specialist Team")
+            team_name = t.team.name if t.team else "Specialist Team"
             duplicate_alert = DuplicateTicketAlert(
-                ticket_id=t["id"],
-                subject=t["subject"],
-                status=t["status"].replace("_", " ").title(),
-                priority=t.get("priority", "medium").upper(),
+                ticket_id=t.id,
+                subject=t.subject,
+                status=t.status.replace("_", " ").title(),
+                priority=t.priority.upper(),
                 assigned_team=team_name,
-                created_at=t["created_at"],
-                similarity_reason=f"Similar open ticket found in {intent.detected_category} queue regarding '{list(common_words or ['issue'])[0]}'.",
+                created_at=t.created_at,
+                similarity_reason=f"Similar open ticket found regarding '{list(common_words or ['issue'])[0]}'.",
             )
             break
 
@@ -2660,65 +2972,159 @@ def analyze_support_request(db: Session, payload: SupportRequestAnalysisRequest)
 # 13. NOTIFICATION & COMMUNICATION CENTER SERVICES
 # =============================================================================
 
-def list_notifications(db: Session, filter_type: Optional[str] = None) -> NotificationListResponse:
-    """Returns active customer support notification feed."""
-    notifs = dev_store.notifications
+def list_notifications(
+    db: Session,
+    current_user: Optional[Any] = None,
+    filter_type: Optional[str] = None,
+    before_id: Optional[int] = None,
+    limit: int = 50,
+) -> NotificationListResponse:
+    user_id = getattr(current_user, "id", None)
+    if not user_id:
+        return NotificationListResponse(notifications=[], unread_count=0, is_live_data=True)
+
+    query = db.query(Notification).filter(
+        Notification.user_id == user_id,
+        Notification.category == "support",
+    )
+
     if filter_type and filter_type.lower() != "all":
         ft = filter_type.lower()
         if ft == "unread":
-            notifs = [n for n in notifs if not n.get("is_read")]
+            query = query.filter(Notification.read_at.is_(None))
         elif ft in ["ticket", "tickets"]:
-            notifs = [n for n in notifs if n.get("target_type") == "ticket"]
+            query = query.filter(Notification.type.in_(["support_ticket_update", "support_agent_reply", "support_resolution"]))
         elif ft in ["incident", "incidents"]:
-            notifs = [n for n in notifs if n.get("target_type") == "incident"]
+            query = query.filter(Notification.type == "support_incident")
         elif ft in ["sla", "slas"]:
-            notifs = [n for n in notifs if n.get("type") == "sla_warning"]
+            query = query.filter(Notification.type == "support_sla_warning")
 
-    items = [
-        SupportNotificationItem(
-            id=n["id"],
-            type=n["type"],
-            title=n["title"],
-            message=n["message"],
-            target_type=n.get("target_type", "ticket"),
-            target_id=n.get("target_id"),
-            is_read=n.get("is_read", False),
-            created_at=n["created_at"],
-            priority=n.get("priority", "normal"),
+    if before_id is not None:
+        query = query.filter(Notification.id < before_id)
+
+    # Keyset paging uses id (before_id), so order by id too: rows written in one
+    # transaction share created_at, and sorting by it alone could skip items.
+    db_notifs = query.order_by(Notification.id.desc()).limit(limit).all()
+
+    unread_count = (
+        db.query(func.count(Notification.id))
+        .filter(
+            Notification.user_id == user_id,
+            Notification.category == "support",
+            Notification.read_at.is_(None),
         )
-        for n in notifs
-    ]
-    unread = sum(1 for n in dev_store.notifications if not n.get("is_read"))
+        .scalar()
+        or 0
+    )
+
+    valid_types = {
+        "ticket_update", "agent_reply", "sla_warning", "escalation",
+        "resolution", "incident_update", "maintenance", "system",
+    }
+    valid_target_types = {"ticket", "incident", "kb_doc", "service_status", "system"}
+
+    items = []
+    for n in db_notifs:
+        raw_type = (n.type or "").replace("support_", "")
+        mapped_type = raw_type if raw_type in valid_types else "system"
+        raw_target = (n.entity_type or "").replace("support_", "")
+        mapped_target = raw_target if raw_target in valid_target_types else "ticket"
+        items.append(
+            SupportNotificationItem(
+                id=str(n.id),
+                type=mapped_type,
+                title="Customer Support Notification",
+                message=n.message,
+                target_type=mapped_target,
+                target_id=str(n.entity_id) if n.entity_id is not None else None,
+                is_read=n.read_at is not None,
+                created_at=n.created_at,
+                priority="normal",
+            )
+        )
+
     return NotificationListResponse(
         notifications=items,
-        unread_count=unread,
-        is_live_data=False,
+        unread_count=unread_count,
+        is_live_data=True,
     )
 
 
-def mark_notification_read(db: Session, notification_id: str) -> dict:
-    """Marks a specific notification item as read."""
-    for n in dev_store.notifications:
-        if n["id"] == notification_id:
-            n["is_read"] = True
-            return {"status": "success", "message": f"Notification '{notification_id}' marked as read."}
-    return {"status": "success", "message": f"Notification '{notification_id}' processed."}
+def mark_notification_read(db: Session, notification_id: str, current_user: Optional[Any] = None) -> dict:
+    user_id = getattr(current_user, "id", None)
+    try:
+        nid = int(notification_id)
+    except (ValueError, TypeError):
+        nid = None
+
+    if nid is not None:
+        notif = db.query(Notification).filter(Notification.id == nid).first()
+        if not notif or (user_id and notif.user_id != user_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Notification id={notification_id} not found.")
+        notif.read_at = datetime.now(timezone.utc)
+        db.commit()
+        return {"status": "success", "message": f"Notification '{notification_id}' marked as read."}
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Notification '{notification_id}' not found.")
 
 
-def mark_all_notifications_read(db: Session) -> dict:
-    """Marks all customer support notifications as read."""
-    for n in dev_store.notifications:
-        n["is_read"] = True
+def mark_all_notifications_read(db: Session, current_user: Optional[Any] = None) -> dict:
+    user_id = getattr(current_user, "id", None)
+    if user_id:
+        db.query(Notification).filter(
+            Notification.user_id == user_id,
+            Notification.category == "support",
+            Notification.read_at.is_(None),
+        ).update({"read_at": datetime.now(timezone.utc)}, synchronize_session=False)
+        db.commit()
     return {"status": "success", "message": "All notifications marked as read."}
 
 
-def get_notification_preferences(db: Session) -> NotificationPreferences:
-    """Fetches customer notification channel preferences."""
-    return NotificationPreferences(**dev_store.notification_preferences)
+def get_notification_preferences(db: Session, current_user: Optional[Any] = None) -> NotificationPreferences:
+    user_id = getattr(current_user, "id", None)
+    if user_id:
+        pref = db.query(SupportNotificationPreference).filter(SupportNotificationPreference.user_id == user_id).first()
+        if pref:
+            return NotificationPreferences(
+                email_notifications=pref.email_notifications,
+                ticket_updates=pref.ticket_updates,
+                sla_alerts=pref.sla_alerts,
+                incident_alerts=pref.incident_alerts,
+                agent_replies=pref.agent_replies,
+            )
+    return NotificationPreferences(
+        email_notifications=True,
+        ticket_updates=True,
+        sla_alerts=True,
+        incident_alerts=True,
+        agent_replies=True,
+    )
 
 
-def update_notification_preferences(db: Session, payload: NotificationPreferences) -> NotificationPreferences:
-    """Updates customer notification channel preferences."""
-    dev_store.notification_preferences = payload.model_dump()
-    return NotificationPreferences(**dev_store.notification_preferences)
+def update_notification_preferences(
+    db: Session, payload: NotificationPreferences, current_user: Optional[Any] = None
+) -> NotificationPreferences:
+    user_id = getattr(current_user, "id", None)
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
 
+    pref = db.query(SupportNotificationPreference).filter(SupportNotificationPreference.user_id == user_id).first()
+    if pref is None:
+        pref = SupportNotificationPreference(user_id=user_id)
+        db.add(pref)
+
+    pref.email_notifications = payload.email_notifications
+    pref.ticket_updates = payload.ticket_updates
+    pref.sla_alerts = payload.sla_alerts
+    pref.incident_alerts = payload.incident_alerts
+    pref.agent_replies = payload.agent_replies
+    db.commit()
+    db.refresh(pref)
+
+    return NotificationPreferences(
+        email_notifications=pref.email_notifications,
+        ticket_updates=pref.ticket_updates,
+        sla_alerts=pref.sla_alerts,
+        incident_alerts=pref.incident_alerts,
+        agent_replies=pref.agent_replies,
+    )

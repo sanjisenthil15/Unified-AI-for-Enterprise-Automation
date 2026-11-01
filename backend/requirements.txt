@@ -13,6 +13,7 @@ email-validator==2.2.0
 pydantic-settings==2.10.1
 pypdf2==3.0.1
 google-genai==1.20.0        # `from google import genai` — used by recruitment + meeting analysis
+httpx==0.28.1               # Supabase Storage REST client (core/object_storage.py); already installed via google-genai
 
 # --- Meeting Intelligence (offline processing) ---
 faster-whisper==1.2.1      # offline speech-to-text

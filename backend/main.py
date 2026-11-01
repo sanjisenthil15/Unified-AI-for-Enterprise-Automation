@@ -31,6 +31,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config.database import SessionLocal
 from config.settings import settings
+from core import audit
+from core.audit import AuditContextMiddleware
 
 # ------------------------------------------------------------------ #
 # Import the models package so SQLAlchemy mappers are registered when
@@ -44,6 +46,7 @@ import models  # noqa: F401
 # ------------------------------------------------------------------ #
 from auth.router import router as auth_router
 from modules.meeting_intelligence import service as meeting_service
+from modules.escalations import scheduler as escalation_scheduler
 from modules.meeting_intelligence.router import router as meeting_router
 from modules.meeting_online.router import router as online_meeting_router
 from modules.recruitment.router import router as recruitment_router
@@ -54,6 +57,12 @@ from modules.attendance.router import router as attendance_router
 from modules.sprints.router import router as sprints_router
 from modules.chat.router import router as chat_router
 from modules.notifications.router import router as notifications_router
+from modules.analytics.router import router as analytics_router
+from modules.intelligence.router import router as intelligence_router
+from modules.leave.router import router as leave_router
+from modules.escalations.router import router as escalations_router
+from modules.audit.router import router as audit_router
+from modules.files.router import router as files_router
 
 
 @asynccontextmanager
@@ -72,7 +81,39 @@ async def lifespan(app: FastAPI):
             db.close()
     except Exception:  # noqa: BLE001
         logging.getLogger(__name__).warning("Startup meeting recovery skipped", exc_info=True)
-    yield
+
+    _warn_if_demo_admin_password_unchanged()
+
+    # Server-side escalation checks, independent of browser polling
+    # (coordinated across workers through the database — see scheduler.py).
+    scheduler_task = escalation_scheduler.start()
+    try:
+        yield
+    finally:
+        await escalation_scheduler.stop(scheduler_task)
+
+
+def _warn_if_demo_admin_password_unchanged() -> None:
+    """The seed migration creates demo@demo.com / Demo1234 (an admin) and
+    that password is published in this repository. Shout about it at
+    startup on any deployment where it still works — never change it
+    automatically, since it may be the only admin account."""
+    try:
+        from core.security import verify_password
+        from models.user import User
+
+        db = SessionLocal()
+        try:
+            demo = db.query(User).filter(User.email == "demo@demo.com", User.is_active.is_(True)).first()
+            if demo is not None and verify_password("Demo1234", demo.hashed_password):
+                logging.getLogger(__name__).critical(
+                    "SECURITY: the seeded admin demo@demo.com still uses its published default password. "
+                    "Change it (Profile -> Change password) or deactivate the account."
+                )
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).warning("Demo-admin password check skipped", exc_info=True)
 
 # ------------------------------------------------------------------ #
 # Application instance
@@ -104,6 +145,13 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------ #
+# Audit trail — per-request correlation id + actor context, and the
+# transactional after_flush listener that writes audit_logs rows.
+# ------------------------------------------------------------------ #
+app.add_middleware(AuditContextMiddleware)
+audit.install(SessionLocal)
+
+# ------------------------------------------------------------------ #
 # Register routers
 # All API routes are versioned under /api/v1
 # ------------------------------------------------------------------ #
@@ -121,7 +169,12 @@ app.include_router(notifications_router,    prefix=API_PREFIX)
 # Static /meetings/online routes precede offline /meetings/{meeting_id}.
 app.include_router(online_meeting_router,   prefix=API_PREFIX)
 app.include_router(meeting_router,          prefix=API_PREFIX)
-# app.include_router(analytics_router, prefix=API_PREFIX)
+app.include_router(analytics_router,        prefix=API_PREFIX)
+app.include_router(intelligence_router,     prefix=API_PREFIX)
+app.include_router(leave_router,            prefix=API_PREFIX)
+app.include_router(escalations_router,      prefix=API_PREFIX)
+app.include_router(audit_router,            prefix=API_PREFIX)
+app.include_router(files_router,            prefix=API_PREFIX)
 
 # ------------------------------------------------------------------ #
 # Database schema is managed by Alembic, NOT by Base.metadata.create_all().

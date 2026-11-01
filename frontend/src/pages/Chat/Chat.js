@@ -63,6 +63,7 @@ export default function Chat() {
   const [activeConversation, setActiveConversation] = useState(null);
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
+  const [isSending, setIsSending] = useState(false);
   const lastMessageIdRef = useRef(null);
   const messagesEndRef = useRef(null);
 
@@ -121,11 +122,17 @@ export default function Chat() {
     }
   }, []);
 
-  // Deep-link support: /chat?with={userId} (Sprints' Team Review "Message" button).
+  // Deep-link support: /chat?with={userId} (Sprints' Team Review "Message"
+  // button) and /chat?group={groupId} (group-created / member-added
+  // notifications). The backend refuses groups the user isn't in.
   useEffect(() => {
     const withUserId = searchParams.get('with');
+    const groupId = searchParams.get('group');
     if (withUserId) {
       openWithUser(Number(withUserId));
+      setSearchParams({}, { replace: true });
+    } else if (groupId && Number(groupId) > 0) {
+      openGroup(Number(groupId));
       setSearchParams({}, { replace: true });
     }
     // eslint-disable-next-line
@@ -258,7 +265,8 @@ export default function Chat() {
 
   async function handleSend(e) {
     e.preventDefault();
-    if (!draft.trim() || !activeConversation) return;
+    if (!draft.trim() || !activeConversation || isSending) return;
+    setIsSending(true);
     try {
       const msg = activeConversation.kind === 'dm'
         ? await sendMessage(activeConversation.id, draft.trim())
@@ -269,6 +277,8 @@ export default function Chat() {
       loadLists();
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not send message.');
+    } finally {
+      setIsSending(false);
     }
   }
 
@@ -449,8 +459,11 @@ export default function Chat() {
                     placeholder={activeConversation.kind === 'channel' ? 'Type a message… (use @ to mention)' : 'Type a message…'}
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
+                    disabled={isSending}
                   />
-                  <button type="submit" className="btn-primary">Send</button>
+                  <button type="submit" className="btn-primary" disabled={isSending || !draft.trim()}>
+                    {isSending ? 'Sending…' : 'Send'}
+                  </button>
                 </form>
               </div>
             </>

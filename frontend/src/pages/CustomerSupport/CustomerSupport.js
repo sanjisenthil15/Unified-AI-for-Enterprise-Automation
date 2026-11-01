@@ -412,6 +412,7 @@ export default function CustomerSupport() {
     showToast(`✓ Ticket #TKT-${created.id} created successfully!`);
     loadHealthAndStats();
     setActiveTab('tickets');
+    return created;
   }
 
   // ── 4. Quick Handlers from KB & Search ──────────────────────────────

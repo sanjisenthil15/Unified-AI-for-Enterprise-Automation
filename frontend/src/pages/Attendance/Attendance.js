@@ -1,14 +1,16 @@
 /**
  * pages/Attendance/Attendance.js
  *
- * Every employee: check in/out for today, see their own history, mark
- * planned leave. If they lead a project (or are admin/hr_manager), an
- * extra "My Team" tab shows the whole team's check-in rate.
+ * Every employee: check in/out for today and see their own history.
+ * Time off is requested on the Leave page and only marks attendance
+ * days on_leave once approved. If they lead a project (or are
+ * admin/hr_manager), an extra "My Team" tab shows the team's check-in rate.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  checkIn, checkOut, getMyAttendance, getTeamAttendance, markLeave,
+  checkIn, checkOut, getMyAttendance, getTeamAttendance,
 } from '../../api/attendanceApi';
 import { getMyEmployeeRecord, listProjects } from '../../api/employeeApi';
 import { getLedProjects } from '../../utils/teamLead';
@@ -37,9 +39,6 @@ export default function Attendance() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-
-  const [showLeaveForm, setShowLeaveForm] = useState(false);
-  const [leaveForm, setLeaveForm] = useState({ startDate: '', endDate: '', reason: '' });
 
   const [tab, setTab] = useState('me');
   const [allProjects, setAllProjects] = useState([]);
@@ -101,19 +100,6 @@ export default function Attendance() {
       setError(err.response?.data?.detail || 'Could not check out.');
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function handleMarkLeave(e) {
-    e.preventDefault();
-    if (!leaveForm.startDate || !leaveForm.endDate) return;
-    try {
-      await markLeave(leaveForm);
-      setLeaveForm({ startDate: '', endDate: '', reason: '' });
-      setShowLeaveForm(false);
-      load();
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Could not mark leave.');
     }
   }
 
@@ -185,35 +171,13 @@ export default function Attendance() {
                 <div className="field-row">
                   <button className="btn-primary" onClick={handleCheckIn} disabled={busy || !canCheckIn}>Check In</button>
                   <button className="btn-secondary" onClick={handleCheckOut} disabled={busy || !canCheckOut}>Check Out</button>
-                  <button className="btn-secondary" onClick={() => setShowLeaveForm((v) => !v)}>
-                    {showLeaveForm ? 'Close' : 'Plan time off'}
-                  </button>
+                  <Link className="btn-secondary" to="/leave">Request time off</Link>
                 </div>
 
                 <div className="alert info" style={{ marginTop: '0.75rem' }}>
-                  Planning time off? Mark it here so those days don't count against your check-in rate in your manager's team review.
+                  Planning time off? Request it on the Leave page — once HR approves it, those days are
+                  marked on leave and don't count against your check-in rate in your manager's team review.
                 </div>
-
-                {showLeaveForm && (
-                  <form onSubmit={handleMarkLeave} className="field-row" style={{ marginTop: '1rem' }}>
-                    <div className="field-group">
-                      <label>Start date</label>
-                      <input className="field-input" type="date" value={leaveForm.startDate}
-                        onChange={(e) => setLeaveForm((f) => ({ ...f, startDate: e.target.value }))} required />
-                    </div>
-                    <div className="field-group">
-                      <label>End date</label>
-                      <input className="field-input" type="date" value={leaveForm.endDate}
-                        onChange={(e) => setLeaveForm((f) => ({ ...f, endDate: e.target.value }))} required />
-                    </div>
-                    <div className="field-group">
-                      <label>Reason</label>
-                      <input className="field-input" value={leaveForm.reason}
-                        onChange={(e) => setLeaveForm((f) => ({ ...f, reason: e.target.value }))} />
-                    </div>
-                    <button type="submit" className="btn-primary">Submit</button>
-                  </form>
-                )}
               </div>
 
               <div className="content-panel">

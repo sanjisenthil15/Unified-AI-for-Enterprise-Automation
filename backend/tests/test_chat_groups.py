@@ -1,4 +1,5 @@
 """Chat groups & channels — Discord-style project-scoped group chat."""
+from tests.helpers import complete_first_login
 
 EMP_BASE = "/api/v1/employee-management"
 CHAT_BASE = "/api/v1/chat"
@@ -23,8 +24,7 @@ def _onboard(client, admin_headers, email, full_name="Test Employee", project_id
     temp_password = r.json()["temporary_password"]
     employee_id = r.json()["employee"]["id"]
     user_id = r.json()["employee"]["user"]["id"]
-    login = client.post("/api/v1/auth/login", json={"email": email, "password": temp_password})
-    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    headers = complete_first_login(client, email, temp_password)
     return {"employee_id": employee_id, "user_id": user_id, "headers": headers}
 
 

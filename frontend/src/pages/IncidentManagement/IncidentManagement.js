@@ -43,11 +43,13 @@ const SEV_LABEL   = { low: 'Low', medium: 'Medium', high: 'High', critical: 'Cri
 const STAT_BADGE  = { open: 'blue', investigating: 'amber', resolved: 'green', closed: 'purple' };
 const STAT_LABEL  = { open: 'Open', investigating: 'Investigating', resolved: 'Resolved', closed: 'Closed' };
 
-const WRITE_ROLES  = ['admin', 'manager', 'it_engineer'];
-const ASSIGN_ROLES = ['admin', 'manager'];
+const WRITE_ROLES  = ['admin', 'manager', 'support_agent'];
+const ASSIGN_ROLES = ['admin', 'manager', 'support_agent'];
+const REPORT_ROLES = ['admin', 'manager', 'hr_manager', 'support_agent', 'recruiter', 'employee'];
 
-function canWrite(user) { return WRITE_ROLES.includes(user?.role?.name?.toLowerCase()); }
-function canAssign(user){ return ASSIGN_ROLES.includes(user?.role?.name?.toLowerCase()); }
+function canWrite(user)  { return WRITE_ROLES.includes(user?.role?.name?.toLowerCase()); }
+function canAssign(user) { return ASSIGN_ROLES.includes(user?.role?.name?.toLowerCase()); }
+function canReport(user) { return REPORT_ROLES.includes(user?.role?.name?.toLowerCase()) || canWrite(user); }
 
 // ── component ────────────────────────────────────────────────────────
 
@@ -338,7 +340,7 @@ export default function IncidentManagement() {
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
-            {canWrite(user) && (
+            {canReport(user) && (
               <button className="btn-primary"
                 onClick={() => { setShowCreate(v => !v); setCreateMsg(null); }}>
                 {showCreate ? '✕ Cancel' : '+ New Incident'}

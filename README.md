@@ -23,7 +23,7 @@ A modular, scalable enterprise web application with a centralized AI Decision En
 **Prerequisites:** Python 3.12, Node 18+, and PostgreSQL 16 (or Docker).
 
 Real login (JWT + RBAC) is on by default. Sign in with the seeded demo account
-`demo@demo.com` / `Demo1234`, or create your own account at `/register` (each
+(see local setup instructions), or create your own account at `/register` (each
 person needs their own account to join Online Meetings under their own name).
 For a quick local demo without logging in, set `AUTH_DISABLED=true` +
 `REACT_APP_AUTH_DISABLED=true` — every request then runs as the seeded admin,
@@ -80,4 +80,10 @@ open it and join under their own name.
 
 `backend/database/schema.sql` is a readable snapshot; the Alembic migrations
 in `backend/migrations/versions/` are authoritative.
+
+### Deploying to production
+See [docs/PRODUCTION_DEPLOYMENT.md](docs/PRODUCTION_DEPLOYMENT.md): pending
+migrations, required environment variables, the escalation scheduler, and the
+safe deployment order. The demo password above is for local use only — change
+it on any shared or hosted deployment.
 "# Unified-AI-for-Enterprise-Automation" 

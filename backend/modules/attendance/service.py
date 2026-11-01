@@ -73,6 +73,17 @@ def check_out(db: Session, employee_id: int) -> Attendance:
 
 
 def mark_leave(db: Session, employee_id: int, start_date: date, end_date: date, reason: str | None) -> list[Attendance]:
+    records = apply_leave_days(db, employee_id, start_date, end_date, reason)
+    db.commit()
+    for r in records:
+        db.refresh(r)
+    return records
+
+
+def apply_leave_days(db: Session, employee_id: int, start_date: date, end_date: date, note: str | None) -> list[Attendance]:
+    """Mark each day in the range on_leave inside the caller's transaction
+    (no commit) — used when a leave request is approved. Days the employee
+    already checked in on are left alone."""
     if end_date < start_date:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "end_date must be on or after start_date.")
 
@@ -92,13 +103,11 @@ def mark_leave(db: Session, employee_id: int, start_date: date, end_date: date, 
             existing = Attendance(employee_id=employee_id, work_date=current)
             db.add(existing)
         existing.status = "on_leave"
-        existing.notes = reason
+        existing.notes = note
         records.append(existing)
         current += timedelta(days=1)
 
-    db.commit()
-    for r in records:
-        db.refresh(r)
+    db.flush()
     return records
 
 

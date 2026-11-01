@@ -31,17 +31,40 @@ axiosInstance.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// ── Response interceptor — handle expired / invalid tokens ──────────
+// ── Response interceptor — handle expired / revoked sessions ───────
+// Dev bypass (REACT_APP_AUTH_DISABLED): the backend never issues 401s for
+// missing tokens then, so there is nothing to redirect for.
+const AUTH_DISABLED = process.env.REACT_APP_AUTH_DISABLED === 'true';
+
+// Credential submissions legitimately answer 401 for a wrong password —
+// those must surface on the form, not bounce the user to /login.
+const CREDENTIAL_ENDPOINTS = ['/api/v1/auth/login', '/api/v1/auth/register'];
+
+function isCredentialRequest(url = '') {
+  return CREDENTIAL_ENDPOINTS.some((path) => url.includes(path));
+}
+
+function goTo(path) {
+  if (window.location.pathname !== path) window.location.assign(path);
+}
+
 axiosInstance.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      // In dev mode with login bypass, do not force hard redirect to /login
-      // Preserved production behavior:
-      // localStorage.removeItem('access_token');
-      // localStorage.removeItem('user');
-      // window.location.href = '/login';
-      console.warn('[Dev Mode] API endpoint returned 401 Unauthorized:', error.config?.url);
+    const status = error.response?.status;
+    if (!AUTH_DISABLED && status === 401 && !isCredentialRequest(error.config?.url)) {
+      // Expired, invalid, or revoked (password changed/reset elsewhere).
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('user');
+      goTo('/login');
+    } else if (!AUTH_DISABLED && status === 403 && error.response?.data?.detail?.code === 'password_change_required') {
+      // Only this specific 403 redirects — ordinary permission 403s are
+      // shown by the page that made the request.
+      try {
+        const user = JSON.parse(localStorage.getItem('user') || 'null');
+        if (user) localStorage.setItem('user', JSON.stringify({ ...user, must_change_password: true }));
+      } catch { /* ignore malformed cache */ }
+      goTo('/change-password');
     }
     return Promise.reject(error);
   }

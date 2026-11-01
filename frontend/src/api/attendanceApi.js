@@ -18,13 +18,6 @@ export async function checkOut() {
   return res.data;
 }
 
-export async function markLeave({ startDate, endDate, reason }) {
-  const res = await axiosInstance.post(`${BASE}/leave`, {
-    start_date: startDate, end_date: endDate, reason: reason || null,
-  });
-  return res.data;
-}
-
 export async function getMyAttendance({ startDate, endDate } = {}) {
   const res = await axiosInstance.get(`${BASE}/me`, {
     params: { start_date: startDate, end_date: endDate },

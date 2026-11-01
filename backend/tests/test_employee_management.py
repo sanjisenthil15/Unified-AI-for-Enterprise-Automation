@@ -1,4 +1,5 @@
 """Employee Management module — onboarding, directory, self-service profile."""
+from tests.helpers import complete_first_login
 
 BASE = "/api/v1/employee-management"
 
@@ -61,8 +62,7 @@ def test_my_record_404_then_200_after_onboarding(client, new_user, unique_email)
     assert r.status_code == 201, r.text
     temp_password = r.json()["temporary_password"]
 
-    login = client.post("/api/v1/auth/login", json={"email": unique_email, "password": temp_password})
-    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    headers = complete_first_login(client, unique_email, temp_password)
     me = client.get(f"{BASE}/me", headers=headers)
     assert me.status_code == 200
     assert me.json()["job_title"] == "Designer"

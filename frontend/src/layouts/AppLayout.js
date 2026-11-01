@@ -11,7 +11,9 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { getMyNotifications, markNotificationRead } from '../api/notificationsApi';
+import { getMyNotifications, getUnreadCount, markNotificationRead } from '../api/notificationsApi';
+import { getMyEmployeeRecord, listProjects } from '../api/employeeApi';
+import { getLedProjects } from '../utils/teamLead';
 import Avatar from '../components/common/Avatar';
 import './AppLayout.css';
 
@@ -20,15 +22,20 @@ const SIDEBAR_PREF_KEY = 'sidebar_expanded';
 
 const NAV_ITEMS = [
   { to: '/dashboard',        icon: '🏠', label: 'Dashboard',            roles: null },
+  { to: '/analytics',        icon: '📊', label: 'Analytics',            roles: ['admin', 'manager', 'viewer'] },
+  { to: '/intelligence',     icon: '🧠', label: 'AI Intelligence',      roles: ['admin', 'manager', 'team_lead'] },
   { to: '/hr',                icon: '🧑‍💼', label: 'HR Recruitment',     roles: ['admin', 'hr_manager', 'recruiter'] },
   { to: '/customer-support',  icon: '🎧', label: 'Customer Support',    roles: null },
   { to: '/incidents',         icon: '🚨', label: 'Incident Management', roles: null },
   { to: '/meetings',          icon: '🎙️', label: 'Meetings',            roles: null },
-  { to: '/employees',         icon: '👥', label: 'Employee Management', roles: ['admin', 'hr_manager'] },
+  { to: '/projects',          icon: '📁', label: 'Projects',            roles: null },
+  { to: '/employees',         icon: '👥', label: 'Employee Management', roles: ['admin', 'hr_manager', 'manager'] },
   { to: '/attendance',        icon: '🕒', label: 'Attendance',          roles: null },
+  { to: '/leave',             icon: '🌴', label: 'Leave',               roles: null },
   { to: '/sprints',           icon: '🏃', label: 'Sprints',             roles: null },
   { to: '/chat',              icon: '💬', label: 'Team Chat',           roles: null },
   { to: '/profile',           icon: '👤', label: 'My Profile',          roles: null },
+  { to: '/audit-log',         icon: '🛡️', label: 'Audit Log',           roles: ['admin'] },
 ];
 
 export default function AppLayout() {
@@ -48,7 +55,28 @@ export default function AppLayout() {
   const displayRole  = user?.role?.name ?? (authDisabled ? 'admin' : '');
   const displayEmail = user?.email ?? '';
 
-  const navItems = NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(role));
+  const [isTeamLead, setIsTeamLead] = useState(false);
+
+  // Relational leadership detection for employees
+  useEffect(() => {
+    if (role === 'employee') {
+      Promise.all([
+        getMyEmployeeRecord().catch(() => null),
+        listProjects().catch(() => []),
+      ]).then(([me, projects]) => {
+        if (me && getLedProjects(me.id, projects).length > 0) {
+          setIsTeamLead(true);
+        }
+      }).catch(() => {});
+    }
+  }, [role]);
+
+  const navItems = NAV_ITEMS.filter((item) => {
+    if (!item.roles) return true;
+    if (item.roles.includes(role)) return true;
+    if (isTeamLead && item.roles.includes('team_lead')) return true;
+    return false;
+  });
 
   const [expanded, setExpanded] = useState(() => {
     try { return localStorage.getItem(SIDEBAR_PREF_KEY) === '1'; } catch { return false; }
@@ -65,10 +93,13 @@ export default function AppLayout() {
 
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
-  const unreadCount = notifications.filter((n) => !n.read_at).length;
+  const [unreadCount, setUnreadCount] = useState(0);
 
+  // The dropdown only shows the latest few; the badge uses the exact
+  // server-side unread total rather than counting a capped list.
   const loadNotifications = useCallback(() => {
-    getMyNotifications().then(setNotifications).catch(() => {});
+    getMyNotifications({ limit: 8 }).then(setNotifications).catch(() => {});
+    getUnreadCount().then((c) => setUnreadCount(c.total)).catch(() => {});
   }, []);
 
   useEffect(() => {

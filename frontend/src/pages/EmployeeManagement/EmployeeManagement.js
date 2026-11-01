@@ -8,15 +8,32 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
-  assignTeamLead, createDepartment, createEmployee, createProject,
-  listDepartments, listEmployees, listProjects, terminateEmployee, updateEmployee,
+  assignProjectManager, assignTeamLead, createDepartment, createEmployee, createProject,
+  deleteProject, listDepartments, listEmployees, listProjects, terminateEmployee, updateEmployee,
+  updateProjectStatus,
 } from '../../api/employeeApi';
-import { listRoles } from '../../api/authApi';
+import { listRoles, resetUserPassword } from '../../api/authApi';
 import Avatar from '../../components/common/Avatar';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
+import { apiErrorText } from '../../utils/passwordPolicy';
+import { PROJECT_STATUS_BADGE, allowedNextStatuses, projectStatusLabel } from '../../utils/projectLifecycle';
 import '../Recruitment/Recruitment.css';
 import '../HRDashboard/HRDashboard.css';
+
+// Who may issue password resets — the backend additionally limits HR to
+// ordinary employee accounts and answers 403 (shown to the user) otherwise.
+const PASSWORD_RESET_ROLES = ['admin', 'hr_manager'];
+const PEOPLE_ADMIN_ROLES = ['admin', 'hr_manager'];
+
+function currentRole() {
+  try {
+    return JSON.parse(localStorage.getItem('user'))?.role?.name?.toLowerCase() ?? '';
+  } catch {
+    return '';
+  }
+}
 
 const EMPLOYMENT_TYPES = ['full_time', 'part_time', 'contract', 'intern'];
 const STATUS_BADGE = { active: 'green', on_leave: 'amber', inactive: 'purple', terminated: 'red' };
@@ -39,9 +56,18 @@ export default function EmployeeManagement() {
   const [saving, setSaving] = useState(false);
   const [newDeptName, setNewDeptName] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectStartDate, setNewProjectStartDate] = useState('');
   const [newProjectDeadline, setNewProjectDeadline] = useState('');
   const [leadPicks, setLeadPicks] = useState({}); // { [projectId]: employeeId }
+  const [managerPicks, setManagerPicks] = useState({}); // { [projectId]: managerUserId }
+  const [statusPicks, setStatusPicks] = useState({}); // { [projectId]: newStatus }
   const [justOnboarded, setJustOnboarded] = useState(null); // { employee, temporary_password }
+  const [justReset, setJustReset] = useState(null); // { name, temporary_password } — shown once
+  const [resettingId, setResettingId] = useState(null);
+  const canResetPasswords = PASSWORD_RESET_ROLES.includes(currentRole());
+  // Managers get read access to this page; every write here (onboarding,
+  // departments, statuses, project staffing) is Admin / HR Manager only.
+  const canManagePeople = PEOPLE_ADMIN_ROLES.includes(currentRole());
 
   const load = useCallback(async () => {
     try {
@@ -82,12 +108,43 @@ export default function EmployeeManagement() {
     e.preventDefault();
     if (!newProjectName.trim()) return;
     try {
-      await createProject({ name: newProjectName.trim(), deadline: newProjectDeadline || null });
+      await createProject({
+        name: newProjectName.trim(),
+        startDate: newProjectStartDate || null,
+        deadline: newProjectDeadline || null,
+      });
       setNewProjectName('');
+      setNewProjectStartDate('');
       setNewProjectDeadline('');
       load();
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not create project.');
+    }
+  }
+
+  async function handleProjectStatusChange(projectId) {
+    const nextStatus = statusPicks[projectId];
+    if (!nextStatus) return;
+    try {
+      await updateProjectStatus(projectId, nextStatus);
+      setStatusPicks((picks) => ({ ...picks, [projectId]: '' }));
+      load();
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : 'Could not update project status.');
+    }
+  }
+
+  async function handleDeleteProject(projectId) {
+    if (!window.confirm('Are you sure you want to delete this project? Only empty projects without sprints or members can be deleted.')) {
+      return;
+    }
+    try {
+      await deleteProject(projectId);
+      load();
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : 'Could not delete project. You may need to archive it instead.');
     }
   }
 
@@ -99,6 +156,19 @@ export default function EmployeeManagement() {
       load();
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not assign team lead — they must already be a member of this project.');
+    }
+  }
+
+  async function handleAssignManager(projectId) {
+    const managerUserId = managerPicks[projectId];
+    if (!managerUserId) return;
+    try {
+      await assignProjectManager(projectId, Number(managerUserId));
+      setManagerPicks((picks) => ({ ...picks, [projectId]: '' }));
+      load();
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : 'Could not assign project manager.');
     }
   }
 
@@ -118,6 +188,7 @@ export default function EmployeeManagement() {
         hireDate: form.hireDate,
         employmentType: form.employmentType,
       });
+      setJustReset(null);
       setJustOnboarded(result);
       setForm(EMPTY_FORM);
       setShowForm(false);
@@ -135,8 +206,28 @@ export default function EmployeeManagement() {
       if (status === 'terminated') await terminateEmployee(id);
       else await updateEmployee(id, { status });
       load();
-    } catch {
-      setError('Could not update employee status.');
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : 'Could not update employee status.');
+    }
+  }
+
+  async function handleResetPassword(emp) {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(
+      `Reset the password for ${emp.user.full_name}?\n\n`
+      + 'They will be signed out everywhere and must set a new password the next time they sign in.',
+    )) return;
+    setResettingId(emp.id);
+    setError('');
+    try {
+      const result = await resetUserPassword(emp.user.id);
+      setJustOnboarded(null);
+      setJustReset({ name: emp.user.full_name, temporary_password: result.temporary_password });
+    } catch (err) {
+      setError(apiErrorText(err, 'Could not reset this password.'));
+    } finally {
+      setResettingId(null);
     }
   }
 
@@ -156,13 +247,35 @@ export default function EmployeeManagement() {
         <div className="content-panel success-panel">
           <h2>✅ {justOnboarded.employee.user.full_name} onboarded</h2>
           <p>
-            Share this one-time temporary password with them — it won't be shown again:
+            Share this one-time temporary password with them privately — it won't be shown again:
           </p>
           <p className="temp-password-box">
             {justOnboarded.temporary_password}
           </p>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+            The first time they sign in they'll be asked to replace it with a password of their own,
+            and they can't use the app until they do.
+          </p>
           <div style={{ marginTop: '0.75rem' }}>
             <button className="btn-secondary" onClick={() => setJustOnboarded(null)}>Dismiss</button>
+          </div>
+        </div>
+      )}
+
+      {justReset && (
+        <div className="content-panel success-panel">
+          <h2>🔑 Password reset for {justReset.name}</h2>
+          <p>
+            Share this one-time temporary password with them privately — it won't be shown again:
+          </p>
+          <p className="temp-password-box">
+            {justReset.temporary_password}
+          </p>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+            Their existing sessions have been signed out, and they must choose a new password at their next sign-in.
+          </p>
+          <div style={{ marginTop: '0.75rem' }}>
+            <button className="btn-secondary" onClick={() => setJustReset(null)}>Dismiss</button>
           </div>
         </div>
       )}
@@ -175,7 +288,7 @@ export default function EmployeeManagement() {
           ))}
           {!departments.length && <span className="muted-note">No departments yet.</span>}
         </div>
-        <form onSubmit={handleAddDepartment} className="field-row">
+        {canManagePeople && <form onSubmit={handleAddDepartment} className="field-row">
           <input
             className="field-input"
             placeholder="New department name"
@@ -183,42 +296,127 @@ export default function EmployeeManagement() {
             onChange={(e) => setNewDeptName(e.target.value)}
           />
           <button type="submit" className="btn-secondary">+ Add department</button>
-        </form>
+        </form>}
       </div>
 
       <div className="content-panel">
-        <h2>Projects</h2>
+        <div className="panel-header-row">
+          <h2>Projects</h2>
+          <Link to="/projects" className="btn-link">Open the Projects page →</Link>
+        </div>
         {projects.length === 0 && <p className="muted-note">No projects yet.</p>}
-        {projects.map((p) => (
-          <div key={p.id} className="list-row">
-            <div className="list-row-main">
-              <strong>{p.name}</strong>
-              <span className="muted-note" style={{ marginLeft: '0.5rem' }}>
-                {p.member_count} member{p.member_count === 1 ? '' : 's'}
-              </span>
-              <div>
-                {p.team_lead
-                  ? <span className="badge green">Lead: {p.team_lead.user.full_name}</span>
-                  : <span className="badge amber">No team lead assigned</span>}
-                {p.deadline && <span className="badge blue" style={{ marginLeft: '0.4rem' }}>Deadline: {p.deadline}</span>}
+        {projects.map((p) => {
+          const activeManagers = employees.filter(
+            (emp) => emp.user?.role?.name === 'manager' && emp.user?.is_active && emp.status === 'active'
+          ).map((emp) => emp.user);
+
+          const allowedNext = allowedNextStatuses(p.status);
+
+          return (
+            <div key={p.id} className="list-row" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div className="list-row-main" style={{ minWidth: '220px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <strong>{p.name}</strong>
+                  <span className={`badge ${PROJECT_STATUS_BADGE[p.status] || 'blue'}`}>
+                    {projectStatusLabel(p.status)}
+                  </span>
+                </div>
+                <span className="muted-note" style={{ marginLeft: '0.5rem' }}>
+                  {p.member_count} member{p.member_count === 1 ? '' : 's'}
+                </span>
+                <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                  {p.manager
+                    ? <span className="badge purple">Manager: {p.manager.full_name}</span>
+                    : <span className="badge amber">No manager assigned</span>}
+                  {p.team_lead
+                    ? <span className="badge green">Lead: {p.team_lead.user.full_name}</span>
+                    : <span className="badge amber">No team lead assigned</span>}
+                  {p.start_date && <span className="badge blue">Start: {p.start_date}</span>}
+                  {p.deadline && <span className="badge blue">Deadline: {p.deadline}</span>}
+                  {p.completed_at && <span className="badge green">Completed: {new Date(p.completed_at).toLocaleDateString()}</span>}
+                  {p.cancelled_at && <span className="badge red">Cancelled: {new Date(p.cancelled_at).toLocaleDateString()}</span>}
+                  {p.archived_at && <span className="badge purple">Archived: {new Date(p.archived_at).toLocaleDateString()}</span>}
+                </div>
               </div>
+
+              {/* Status transition control */}
+              {allowedNext.length > 0 && (
+                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                  <select
+                    className="field-select"
+                    value={statusPicks[p.id] || ''}
+                    onChange={(e) => setStatusPicks((picks) => ({ ...picks, [p.id]: e.target.value }))}
+                  >
+                    <option value="">Change status…</option>
+                    {allowedNext.map((st) => (
+                      <option key={st} value={st}>{projectStatusLabel(st)}</option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => handleProjectStatusChange(p.id)}
+                    disabled={!statusPicks[p.id]}
+                  >
+                    Update
+                  </button>
+                </div>
+              )}
+
+              {/* Manager assignment (Admin / HR) */}
+              {canManagePeople && <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                <select
+                  className="field-select"
+                  value={managerPicks[p.id] || ''}
+                  onChange={(e) => setManagerPicks((picks) => ({ ...picks, [p.id]: e.target.value }))}
+                >
+                  <option value="">Set manager…</option>
+                  {activeManagers.map((mgr) => (
+                    <option key={mgr.id} value={mgr.id}>{mgr.full_name} ({mgr.email})</option>
+                  ))}
+                </select>
+                <button
+                  className="btn-secondary"
+                  onClick={() => handleAssignManager(p.id)}
+                  disabled={!managerPicks[p.id]}
+                >
+                  Assign Manager
+                </button>
+              </div>}
+
+              {/* Team Lead assignment (Admin / HR) */}
+              {canManagePeople && <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                <select
+                  className="field-select"
+                  value={leadPicks[p.id] || ''}
+                  onChange={(e) => setLeadPicks((picks) => ({ ...picks, [p.id]: e.target.value }))}
+                >
+                  <option value="">Set team lead…</option>
+                  {employees.filter((emp) => emp.project?.id === p.id).map((emp) => (
+                    <option key={emp.id} value={emp.id}>{emp.user.full_name}</option>
+                  ))}
+                </select>
+                <button className="btn-secondary" onClick={() => handleAssignLead(p.id)} disabled={!leadPicks[p.id]}>
+                  Assign Lead
+                </button>
+              </div>}
+
+              {/* Delete button (Admin / HR) */}
+              {canManagePeople && (
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <button
+                    className="btn-secondary"
+                    style={{ color: '#ef4444', borderColor: '#ef4444' }}
+                    onClick={() => handleDeleteProject(p.id)}
+                    title="Delete unassociated project"
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
             </div>
-            <select
-              className="field-select"
-              value={leadPicks[p.id] || ''}
-              onChange={(e) => setLeadPicks((picks) => ({ ...picks, [p.id]: e.target.value }))}
-            >
-              <option value="">Set team lead…</option>
-              {employees.filter((emp) => emp.project?.id === p.id).map((emp) => (
-                <option key={emp.id} value={emp.id}>{emp.user.full_name}</option>
-              ))}
-            </select>
-            <button className="btn-secondary" onClick={() => handleAssignLead(p.id)} disabled={!leadPicks[p.id]}>
-              Assign
-            </button>
-          </div>
-        ))}
-        <form onSubmit={handleAddProject} className="field-row" style={{ marginTop: '0.75rem' }}>
+          );
+        })}
+        {canManagePeople && <form onSubmit={handleAddProject} className="field-row" style={{ marginTop: '0.75rem', flexWrap: 'wrap' }}>
           <input
             className="field-input"
             placeholder="New project name"
@@ -228,23 +426,32 @@ export default function EmployeeManagement() {
           <input
             className="field-input"
             type="date"
+            title="Start date (optional)"
+            value={newProjectStartDate}
+            onChange={(e) => setNewProjectStartDate(e.target.value)}
+          />
+          <input
+            className="field-input"
+            type="date"
             title="Deadline (optional)"
             value={newProjectDeadline}
             onChange={(e) => setNewProjectDeadline(e.target.value)}
           />
           <button type="submit" className="btn-secondary">+ Add project</button>
-        </form>
+        </form>}
       </div>
 
       <div className="content-panel">
         <div className="panel-header-row">
           <h2>Employee directory</h2>
-          <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
-            {showForm ? 'Close' : '+ Onboard employee'}
-          </button>
+          {canManagePeople && (
+            <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
+              {showForm ? 'Close' : '+ Onboard employee'}
+            </button>
+          )}
         </div>
 
-        {showForm && (
+        {canManagePeople && showForm && (
           <div className="job-form-box">
             <h3 className="section-subheading" style={{ marginTop: 0 }}>Onboard a new employee</h3>
             <form onSubmit={handleOnboard}>
@@ -344,7 +551,8 @@ export default function EmployeeManagement() {
                     <span className={`badge ${STATUS_BADGE[emp.status] || 'purple'}`}>{emp.status.replace('_', ' ')}</span>
                   </td>
                   <td>
-                    <select
+                    {!canManagePeople && <span className="muted-note">View only</span>}
+                    {canManagePeople && <select
                       className="field-select"
                       value={emp.status}
                       onChange={(e) => handleStatusChange(emp.id, e.target.value)}
@@ -354,7 +562,18 @@ export default function EmployeeManagement() {
                       <option value="on_leave">on_leave</option>
                       <option value="inactive">inactive</option>
                       <option value="terminated">terminated</option>
-                    </select>
+                    </select>}
+                    {canResetPasswords && emp.status !== 'terminated' && (
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ marginTop: '0.4rem', padding: '0.35rem 0.7rem', fontSize: '0.78rem', display: 'block' }}
+                        onClick={() => handleResetPassword(emp)}
+                        disabled={resettingId === emp.id}
+                      >
+                        {resettingId === emp.id ? 'Resetting…' : 'Reset password'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

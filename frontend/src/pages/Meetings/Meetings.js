@@ -10,7 +10,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import '../Recruitment/Recruitment.css'; // shared .module-page / .content-panel / .badge
 import './Meetings.css';
 
@@ -39,6 +39,9 @@ const LIST_POLL_MS = 6000;
 const DETAIL_POLL_MS = 4000;
 
 export default function Meetings() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const meetingQueryId = searchParams.get('meeting');
+
   const [meetings, setMeetings] = useState([]);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState('');
@@ -105,6 +108,7 @@ export default function Meetings() {
   const openMeeting = useCallback(
     async (id) => {
       setSelectedId(id);
+      setSearchParams({ meeting: id }, { replace: true });
       setShowUpload(false);
       setDetail(null);
       setTranscript(null);
@@ -114,15 +118,25 @@ export default function Meetings() {
       await loadDetail(id);
       setDetailLoading(false);
     },
-    [loadDetail],
+    [loadDetail, setSearchParams],
   );
 
   const backToList = useCallback(() => {
     setSelectedId(null);
+    setSearchParams({}, { replace: true });
     setDetail(null);
     setDetailError('');
     loadList();
-  }, [loadList]);
+  }, [loadList, setSearchParams]);
+
+  useEffect(() => {
+    if (meetingQueryId) {
+      const parsed = Number(meetingQueryId);
+      if (!Number.isNaN(parsed) && parsed !== selectedId) {
+        openMeeting(parsed);
+      }
+    }
+  }, [meetingQueryId, openMeeting, selectedId]);
 
   useEffect(() => {
     if (!selectedId || !detail || !isInProgress(detail.status)) return undefined;

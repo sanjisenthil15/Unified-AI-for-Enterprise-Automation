@@ -9,6 +9,7 @@ import * as api from '../../api/onlineMeetingApi';
 
 jest.mock('../../api/onlineMeetingApi', () => ({
   startOnlineMeeting: jest.fn(),
+  getMyActiveOnlineMeeting: jest.fn(),
   getOnlineMeeting: jest.fn(),
   getOnlineTicket: jest.fn(),
   endOnlineMeeting: jest.fn(),
@@ -42,6 +43,7 @@ beforeEach(() => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
   global.WebSocket = TestSocket;
   Object.defineProperty(global, 'crypto', { configurable: true, value: { randomUUID: () => 'client-uuid' } });
+  api.getMyActiveOnlineMeeting.mockResolvedValue(null);
   api.getOnlineMeeting.mockResolvedValue(session);
   api.getOnlineTicket.mockResolvedValue({ ticket: 'test-ticket' });
   container = document.createElement('div');
@@ -74,7 +76,7 @@ test('start failure remains visible without fake successful navigation', async (
   await render(<MemoryRouter><OnlineMeeting /></MemoryRouter>);
   await act(async () => Simulate.change(container.querySelector('input'), { target: { value: 'Sync' } }));
   await act(async () => Simulate.submit(container.querySelector('form')));
-  expect(api.startOnlineMeeting).toHaveBeenCalledWith('Sync', 'client-uuid');
+  expect(api.startOnlineMeeting).toHaveBeenCalledWith('Sync', 'client-uuid', { projectId: undefined });
   expect(container.textContent).toContain('Could not start meeting');
 });
 

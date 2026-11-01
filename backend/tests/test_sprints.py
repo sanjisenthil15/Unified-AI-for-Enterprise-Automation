@@ -1,4 +1,5 @@
 """Sprints module — sprints, tasks, manager review, and access control."""
+from tests.helpers import complete_first_login
 
 EMP_BASE = "/api/v1/employee-management"
 SPR_BASE = "/api/v1/sprints"
@@ -25,14 +26,14 @@ def _onboard(client, admin_headers, email, full_name="Test Employee", project_id
     assert r.status_code == 201, r.text
     temp_password = r.json()["temporary_password"]
     employee_id = r.json()["employee"]["id"]
-    login = client.post("/api/v1/auth/login", json={"email": email, "password": temp_password})
-    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    headers = complete_first_login(client, email, temp_password)
     return {"employee_id": employee_id, "headers": headers}
 
 
 def _make_project_with_lead(client, admin_headers, unique_email):
     project = client.post(f"{EMP_BASE}/projects", headers=admin_headers, json={
         "name": f"Project {unique_email}",
+        "status": "active",
     }).json()
     lead = _onboard(client, admin_headers, _tag(unique_email, "lead"), "Team Lead", project_id=project["id"])
     client.post(f"{EMP_BASE}/projects/{project['id']}/team-lead", headers=admin_headers,
@@ -158,7 +159,7 @@ def test_overdue_task_notifies_team_lead_once(client, new_user, unique_email):
 def test_generate_weekly_sprints_fills_to_deadline_idempotently(client, new_user, unique_email):
     admin = new_user("Admin User")
     project = client.post(f"{EMP_BASE}/projects", headers=admin["headers"], json={
-        "name": f"Project {unique_email}", "deadline": "2027-01-15",
+        "name": f"Project {unique_email}", "deadline": "2027-01-15", "status": "active",
     }).json()
     role_id = _role_id(client, admin["headers"], "employee")
     lead_email = _tag(unique_email, "lead")
@@ -170,8 +171,7 @@ def test_generate_weekly_sprints_fills_to_deadline_idempotently(client, new_user
     client.post(f"{EMP_BASE}/projects/{project['id']}/team-lead", headers=admin["headers"],
                 json={"employee_id": lead_employee_id})
     temp_password = r.json()["temporary_password"]
-    login = client.post("/api/v1/auth/login", json={"email": lead_email, "password": temp_password})
-    lead_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    lead_headers = complete_first_login(client, lead_email, temp_password)
 
     # Setting a deadline at project creation auto-generates the weekly
     # shells right away — "add sprint by itself," no button click needed.

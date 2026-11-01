@@ -58,6 +58,13 @@ class EmployeeUpdate(BaseModel):
     phone: Optional[str] = Field(None, max_length=30)
     employment_type: Optional[str] = Field(None, pattern="^(" + "|".join(EMPLOYMENT_TYPES) + ")$")
     status: Optional[str] = Field(None, pattern="^(" + "|".join(EMPLOYEE_STATUSES) + ")$")
+    role_id: Optional[int] = Field(None, ge=1, description="Update role (Admin / HR Manager only)")
+
+
+class EmployeeRoleInfo(BaseModel):
+    name: str
+
+    model_config = {"from_attributes": True}
 
 
 class EmployeeUserInfo(BaseModel):
@@ -65,6 +72,9 @@ class EmployeeUserInfo(BaseModel):
     full_name: str
     email: str
     is_active: bool
+    # The account's access role (name only) — lets the Projects UI offer
+    # just the Manager-role accounts when assigning a project manager.
+    role: Optional[EmployeeRoleInfo] = None
 
     model_config = {"from_attributes": True}
 
@@ -100,6 +110,19 @@ class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=150)
     description: Optional[str] = None
     deadline: Optional[date] = None
+    start_date: Optional[date] = None
+    status: Optional[str] = None
+
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=2, max_length=150)
+    description: Optional[str] = None
+    start_date: Optional[date] = None
+    deadline: Optional[date] = None
+
+
+class ProjectStatusUpdate(BaseModel):
+    status: str = Field(..., description="Target status: planning, active, on_hold, completed, cancelled, archived")
 
 
 class ProjectTeamLeadInfo(BaseModel):
@@ -110,14 +133,29 @@ class ProjectTeamLeadInfo(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ProjectManagerInfo(BaseModel):
+    id: int
+    full_name: str
+    email: str
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
 class ProjectResponse(BaseModel):
     id: int
     name: str
     description: Optional[str] = None
+    status: str
+    start_date: Optional[date] = None
     deadline: Optional[date] = None
     team_lead: Optional[ProjectTeamLeadInfo] = None
+    manager: Optional[ProjectManagerInfo] = None
     member_count: int = 0
     created_at: datetime
+    completed_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    archived_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -126,10 +164,13 @@ class AssignTeamLead(BaseModel):
     employee_id: int = Field(..., description="Employee to designate as this project's team lead")
 
 
+class AssignProjectManager(BaseModel):
+    manager_user_id: int = Field(..., description="User ID of the active Manager to assign to this project")
+
+
 class EmployeeCreatedResponse(BaseModel):
     """Returned once, right after onboarding — the only time the plaintext
-    temporary password is available. There's no email integration in this
-    app yet, so HR hands this to the new hire directly."""
+    temporary password is available."""
 
     employee: EmployeeResponse
     temporary_password: str

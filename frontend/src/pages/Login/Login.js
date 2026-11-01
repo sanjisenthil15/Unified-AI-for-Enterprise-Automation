@@ -12,9 +12,9 @@
  * UI is unchanged — only the handleSubmit logic was updated.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { loginUser, getCurrentUser } from '../../api/authApi';
+import { getRegistrationStatus, loginUser, getCurrentUser } from '../../api/authApi';
 import './Login.css';
 
 // Module chips shown on the brand panel (static — UI unchanged)
@@ -35,6 +35,14 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error,    setError]    = useState('');
   const [loading,  setLoading]  = useState(false);
+  // null while unknown; only offer sign-up when the backend says it's open.
+  const [registrationOpen, setRegistrationOpen] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    getRegistrationStatus().then((open) => { if (active) setRegistrationOpen(open); });
+    return () => { active = false; };
+  }, []);
   const justRegistered = Boolean(location.state?.registered);
 
   async function handleSubmit(e) {
@@ -59,16 +67,27 @@ export default function Login() {
       const user = await getCurrentUser();
       localStorage.setItem('user', JSON.stringify(user));
 
-      // Step 4 — Navigate based on role
+      // Step 4 — Accounts still on an HR-issued temporary password must set
+      // their own before anything else (the backend blocks other APIs too).
       const role = user?.role?.name?.toLowerCase();
-      if (role === 'hr_manager') {
+      if (user?.must_change_password) {
+        navigate('/change-password', { replace: true });
+      } else if (role === 'hr_manager') {
         navigate('/hr');
       } else {
         navigate('/dashboard');
       }
-    } catch {
-      // Step 5 — Any 4xx/5xx maps to a single friendly message
-      setError('Invalid email or password.');
+    } catch (err) {
+      // Step 5 — Wrong credentials stay deliberately generic (no account
+      // enumeration); a rate-limit lock (429) or a disabled account (403)
+      // shows the server's message so the user knows to wait / ask HR.
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      if ((status === 429 || status === 403) && typeof detail === 'string') {
+        setError(detail);
+      } else {
+        setError('Invalid email or password.');
+      }
     } finally {
       setLoading(false);
     }
@@ -175,9 +194,16 @@ export default function Login() {
           </button>
         </form>
 
-        <p className="login-footer">
-          No account? <Link to="/register">Create one</Link>
-        </p>
+        {registrationOpen === true && (
+          <p className="login-footer">
+            No account? <Link to="/register">Create one</Link>
+          </p>
+        )}
+        {registrationOpen === false && (
+          <p className="login-footer">
+            Need an account? Ask HR or an administrator to create one for you.
+          </p>
+        )}
         <p className="login-footer">
           © {new Date().getFullYear()} Unified AI Enterprise Platform
         </p>

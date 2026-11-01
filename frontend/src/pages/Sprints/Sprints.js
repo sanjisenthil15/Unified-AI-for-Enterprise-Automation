@@ -8,7 +8,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   createSprint, createTask, generateWeeklySprints, getBurndown, getEnterpriseOverview,
   getManagerReview, listSprints, listTasks, updateTask,
@@ -52,6 +52,8 @@ export default function Sprints() {
   const [error, setError] = useState('');
 
   const [projectId, setProjectId] = useState('');
+  const [searchParams] = useSearchParams();
+  const linkedProjectId = searchParams.get('project_id');
   const [sprints, setSprints] = useState([]);
   const [sprintId, setSprintId] = useState('');
   const [tasks, setTasks] = useState([]);
@@ -82,12 +84,16 @@ export default function Sprints() {
         listProjects(),
       ]);
       setAllProjects(projects);
+      // Notification deep links (/sprints?project_id=N) open that project —
+      // but only if it's one of the projects the backend already lets this
+      // user see.
+      const linked = projects.find((p) => p.id === Number(linkedProjectId));
       if (me) {
         setMyEmployee(me);
         setLedProjects(getLedProjects(me.id, projects));
-        setProjectId((cur) => cur || (me.project?.id ?? projects[0]?.id ?? ''));
+        setProjectId((cur) => cur || (linked?.id ?? me.project?.id ?? projects[0]?.id ?? ''));
       } else if (projects.length) {
-        setProjectId((cur) => cur || projects[0].id);
+        setProjectId((cur) => cur || (linked?.id ?? projects[0].id));
       }
       setError('');
     } catch {
@@ -95,7 +101,7 @@ export default function Sprints() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [linkedProjectId]);
 
   useEffect(() => { load(); }, [load]);
 

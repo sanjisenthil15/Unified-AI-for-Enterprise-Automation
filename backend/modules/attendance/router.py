@@ -6,7 +6,7 @@ FastAPI router for the Attendance module.
 Endpoints:
     POST /attendance/check-in                     — self check-in (any employee)
     POST /attendance/check-out                     — self check-out (any employee)
-    POST /attendance/leave                          — self-declare planned leave (any employee)
+    POST /attendance/leave                          — retired (410): leave goes through /leave/requests approval
     GET  /attendance/me                              — own history (any employee)
     GET  /attendance/team?project_id=                — team view (that project's team lead, or admin/hr_manager)
     GET  /attendance/employee/{employee_id}           — single-employee drill-down (their team lead, or admin/hr_manager)
@@ -15,7 +15,7 @@ Endpoints:
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from config.database import get_db
@@ -47,13 +47,21 @@ def check_out(
     return service.check_out(db, current_employee.id)
 
 
-@router.post("/leave", response_model=List[AttendanceResponse], summary="Mark planned leave for a date range")
+@router.post(
+    "/leave", status_code=status.HTTP_410_GONE, deprecated=True,
+    summary="Retired — submit a leave request for approval instead (POST /leave/requests)",
+)
 def mark_leave(
     payload: LeaveRequest,
-    db: Session = Depends(get_db),
     current_employee: Employee = Depends(get_current_employee),
 ):
-    return service.mark_leave(db, current_employee.id, payload.start_date, payload.end_date, payload.reason)
+    # Self-marking leave would bypass the Admin / HR Manager approval
+    # workflow (Phase 4.3). Approved requests mark these days on_leave via
+    # the same attendance service function this endpoint used to call.
+    raise HTTPException(
+        status.HTTP_410_GONE,
+        "Leave now needs approval — submit a request with POST /api/v1/leave/requests.",
+    )
 
 
 @router.get("/me", response_model=List[AttendanceResponse], summary="The caller's own attendance history")

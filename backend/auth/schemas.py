@@ -12,7 +12,9 @@ talk to the database; these schemas talk to the API boundary.
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+
+from core.security import validate_password_policy
 
 
 # ------------------------------------------------------------------ #
@@ -41,26 +43,17 @@ class UserRegister(BaseModel):
     )
     password: str = Field(
         ...,
-        min_length=8,
-        max_length=128,
         examples=["Str0ng!Pass"],
-        description="Plain-text password (min 8 characters). Stored as bcrypt hash.",
+        description=(
+            "Plain-text password: 8+ characters, at most 72 bytes, with an "
+            "uppercase letter and a digit. Stored as a bcrypt hash."
+        ),
     )
 
     @field_validator("password")
     @classmethod
     def password_strength(cls, v: str) -> str:
-        """
-        Enforce a minimal password policy:
-        - At least one uppercase letter
-        - At least one digit
-        Keeps security reasonable without over-engineering.
-        """
-        if not any(c.isupper() for c in v):
-            raise ValueError("Password must contain at least one uppercase letter.")
-        if not any(c.isdigit() for c in v):
-            raise ValueError("Password must contain at least one digit.")
-        return v
+        return validate_password_policy(v)
 
 
 class UserLogin(BaseModel):
@@ -78,6 +71,28 @@ class UserLogin(BaseModel):
         examples=["Str0ng!Pass"],
         description="Plain-text password to verify against stored hash",
     )
+
+
+class ChangePasswordRequest(BaseModel):
+    """Payload for POST /auth/change-password."""
+
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(
+        ...,
+        description="8+ characters, at most 72 bytes, with an uppercase letter and a digit.",
+    )
+    confirm_password: str = Field(..., min_length=1)
+
+    @field_validator("new_password")
+    @classmethod
+    def new_password_strength(cls, v: str) -> str:
+        return validate_password_policy(v)
+
+    @model_validator(mode="after")
+    def passwords_match(self):
+        if self.new_password != self.confirm_password:
+            raise ValueError("New password and confirmation do not match.")
+        return self
 
 
 # ------------------------------------------------------------------ #
@@ -104,6 +119,7 @@ class UserResponse(BaseModel):
     full_name: str
     email: str
     is_active: bool
+    must_change_password: bool = False
     role: RoleResponse
     created_at: datetime
 
@@ -124,6 +140,15 @@ class Token(BaseModel):
         default="bearer",
         description="Always 'bearer' — used in the Authorization header",
     )
+
+
+class AdminPasswordResetResponse(BaseModel):
+    """Returned ONCE to the admin/HR who performed the reset. The temporary
+    password is never stored in plain text or returned by any other API."""
+
+    user_id: int
+    temporary_password: str
+    must_change_password: bool = True
 
 
 class TokenPayload(BaseModel):

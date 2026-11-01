@@ -22,6 +22,8 @@ class Project(Base):
 
     name        = Column(String(150), nullable=False, unique=True)
     description = Column(Text, nullable=True)
+    status      = Column(String(20), nullable=False, default="planning", server_default="planning")
+    start_date  = Column(Date, nullable=True)
     deadline    = Column(Date, nullable=True)
 
     team_lead_id = Column(
@@ -30,11 +32,21 @@ class Project(Base):
         nullable=True,
         index=True,
     )
+    manager_user_id = Column(
+        BigInteger,
+        ForeignKey("users.id", onupdate="CASCADE", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    archived_at  = Column(DateTime(timezone=True), nullable=True)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     team_lead = relationship("Employee", foreign_keys=[team_lead_id])
+    manager   = relationship("User", foreign_keys=[manager_user_id])
     members   = relationship("Employee", back_populates="project", foreign_keys="Employee.project_id")
 
     def __repr__(self) -> str:

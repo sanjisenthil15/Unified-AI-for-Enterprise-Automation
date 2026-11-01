@@ -78,6 +78,32 @@ class User(Base):
     )
 
     # ------------------------------------------------------------------ #
+    # Credential lifecycle
+    # ------------------------------------------------------------------ #
+    must_change_password = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        comment="True while the account still uses an HR-issued temporary password",
+    )
+    token_version = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Embedded in JWTs as `ver`; incrementing it revokes all earlier sessions",
+    )
+    password_changed_at = Column(DateTime(timezone=True), nullable=True)
+    password_reset_by_id = Column(
+        BigInteger,
+        ForeignKey("users.id", onupdate="CASCADE", ondelete="SET NULL"),
+        nullable=True,
+        comment="Who last issued an administrative password reset for this account",
+    )
+    password_reset_at = Column(DateTime(timezone=True), nullable=True)
+
+    # ------------------------------------------------------------------ #
     # Timestamps
     # ------------------------------------------------------------------ #
     created_at = Column(

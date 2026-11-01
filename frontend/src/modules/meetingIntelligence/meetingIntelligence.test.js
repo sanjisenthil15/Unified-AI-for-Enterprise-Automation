@@ -3,8 +3,10 @@
  * Renders each component with API-shaped props (incl. empty / edge cases)
  * and checks the formatting helpers. Runs with `npm test`.
  */
-import React from 'react';
+import React, { act } from 'react';
 import { renderToString } from 'react-dom/server';
+import { createRoot } from 'react-dom/client';
+import { Simulate } from 'react-dom/test-utils';
 
 import SummaryPanel from './SummaryPanel';
 import TranscriptViewer from './TranscriptViewer';
@@ -12,6 +14,12 @@ import ActionItemList from './ActionItemList';
 import MeetingList from './MeetingList';
 import AudioUpload from './AudioUpload';
 import { statusBadge, formatDuration, formatTimestamp, isInProgress } from './helpers';
+
+// AudioUpload loads the project picker on mount. A plain function (not
+// jest.fn) so CRA's resetMocks doesn't wipe the resolved value between tests.
+jest.mock('../../api/employeeApi', () => ({
+  listProjects: () => Promise.resolve([]),
+}));
 
 const analysis = {
   meeting_id: 1, summary: 'They discussed hiring three developers.',
@@ -63,5 +71,29 @@ test('components render with API-shaped props', () => {
   expect(renderToString(<ActionItemList items={[]} />)).toContain('No action items');
   expect(renderToString(<MeetingList meetings={meetings} loading={false} onSelect={noop} />)).toContain('Processing');
   expect(renderToString(<MeetingList meetings={[]} loading={false} onSelect={noop} />)).toContain('No meetings yet');
-  expect(renderToString(<AudioUpload onUploaded={noop} onCancel={noop} />)).toContain('Meeting title');
+  const upload = renderToString(<AudioUpload onUploaded={noop} onCancel={noop} />);
+  expect(upload).toContain('Record a new meeting');
+  expect(upload).toContain('Upload video or audio from device');
+  expect(upload).not.toContain('Meeting title');
+});
+
+test('AudioUpload: choosing "Upload" reveals the meeting details form', async () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<AudioUpload onUploaded={() => {}} onCancel={() => {}} />));
+    expect(container.textContent).not.toContain('Meeting title');
+
+    const uploadChoice = [...container.querySelectorAll('button')]
+      .find((b) => b.textContent.includes('Upload video or audio from device'));
+    await act(async () => Simulate.click(uploadChoice));
+
+    expect(container.textContent).toContain('Meeting title');
+    expect(container.querySelector('input[type="file"]')).not.toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
 });

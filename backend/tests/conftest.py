@@ -39,6 +39,41 @@ def _cleanup_test_rows() -> None:
     a simple substring match is both correct and actually works.
     """
     with engine.begin() as conn:
+        # meeting_action_items has ON DELETE RESTRICT on sprint_tasks and users.
+        # Clean up any test action items before sprints and users are deleted.
+        conn.execute(text("""
+            DELETE FROM meeting_action_items
+            WHERE converted_sprint_task_id IN (
+                SELECT st.id FROM sprint_tasks st
+                JOIN sprints s ON st.sprint_id = s.id
+                JOIN projects p ON s.project_id = p.id
+                WHERE p.name LIKE 'Project %pytest%'
+            )
+            OR meeting_id IN (
+                SELECT id FROM meetings WHERE created_by IN (
+                    SELECT id FROM users WHERE email LIKE :p
+                )
+            )
+            OR reviewed_by_id IN (
+                SELECT id FROM users WHERE email LIKE :p
+            )
+        """), {"p": TEST_EMAIL_LIKE})
+        # Clean up support tickets and ticket messages created during tests
+        conn.execute(text("""
+            DELETE FROM ticket_messages WHERE ticket_id IN (
+                SELECT id FROM support_tickets WHERE submitted_by IN (
+                    SELECT id FROM users WHERE email LIKE :p
+                )
+            ) OR sender_id IN (
+                SELECT id FROM users WHERE email LIKE :p
+            )
+        """), {"p": TEST_EMAIL_LIKE})
+        conn.execute(text("""
+            DELETE FROM support_tickets WHERE submitted_by IN (
+                SELECT id FROM users WHERE email LIKE :p
+            )
+        """), {"p": TEST_EMAIL_LIKE})
+
         # sprints.project_id and chat_groups.project_id are both ON DELETE
         # RESTRICT — clear sprints (cascading tasks/snapshots) and chat
         # groups (cascading members/channels/messages) before the projects
@@ -67,6 +102,17 @@ def _cleanup_test_rows() -> None:
             "(SELECT id FROM job_postings WHERE created_by = ANY(:ids))"
         ), {"ids": user_ids})
         conn.execute(text("DELETE FROM job_postings WHERE created_by = ANY(:ids)"), {"ids": user_ids})
+        # escalations reference their entity loosely (no FK) — drop the
+        # ones about test meetings / test leave requests explicitly.
+        conn.execute(text(
+            "DELETE FROM escalations WHERE entity_type = 'meeting' AND entity_id IN "
+            "(SELECT id FROM meetings WHERE created_by = ANY(:ids))"
+        ), {"ids": user_ids})
+        conn.execute(text(
+            "DELETE FROM escalations WHERE entity_type = 'leave_request' AND entity_id IN "
+            "(SELECT lr.id FROM leave_requests lr JOIN employees e ON lr.employee_id = e.id "
+            "WHERE e.user_id = ANY(:ids))"
+        ), {"ids": user_ids})
         # meeting children cascade from meetings (ON DELETE CASCADE)
         conn.execute(text("DELETE FROM meetings WHERE created_by = ANY(:ids)"), {"ids": user_ids})
         # manager_chat_threads.{employee_id,manager_user_id} are ON DELETE RESTRICT
@@ -78,6 +124,18 @@ def _cleanup_test_rows() -> None:
         # attendance_records.employee_id and sprints.created_by are ON DELETE RESTRICT/SET NULL
         # respectively — clear attendance before the employee; any remaining test
         # sprints (created_by a test user, on a non-test-named project) too.
+        # Leave notifications/escalations also reach the dev DB's real
+        # approvers — remove every notification about a test request.
+        conn.execute(text(
+            "DELETE FROM notifications WHERE entity_type = 'leave_request' AND entity_id IN "
+            "(SELECT lr.id FROM leave_requests lr JOIN employees e ON lr.employee_id = e.id "
+            "WHERE e.user_id = ANY(:ids))"
+        ), {"ids": user_ids})
+        # leave_requests.employee_id / reviewed_by_id are ON DELETE RESTRICT.
+        conn.execute(text(
+            "DELETE FROM leave_requests WHERE reviewed_by_id = ANY(:ids) OR employee_id IN "
+            "(SELECT id FROM employees WHERE user_id = ANY(:ids))"
+        ), {"ids": user_ids})
         conn.execute(text(
             "DELETE FROM attendance_records WHERE employee_id IN "
             "(SELECT id FROM employees WHERE user_id = ANY(:ids))"
@@ -87,9 +145,40 @@ def _cleanup_test_rows() -> None:
             "(SELECT id FROM employees WHERE user_id = ANY(:ids))"
         ), {"ids": user_ids})
         conn.execute(text("DELETE FROM notifications WHERE user_id = ANY(:ids)"), {"ids": user_ids})
+        # projects.manager_user_id is ON DELETE RESTRICT — clear it before the user
+        conn.execute(text("UPDATE projects SET manager_user_id = NULL WHERE manager_user_id = ANY(:ids)"), {"ids": user_ids})
         # employees.user_id is ON DELETE RESTRICT — must clear it before the user
         conn.execute(text("DELETE FROM employees WHERE user_id = ANY(:ids)"), {"ids": user_ids})
         conn.execute(text("DELETE FROM users WHERE id = ANY(:ids)"), {"ids": user_ids})
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _no_background_escalation_sweep():
+    """The scheduler and GET /notifications/me both trigger the escalation
+    sweep, which would act on whatever pending leave / action items exist
+    in the shared dev DB mid-test. Escalation tests call it explicitly."""
+    from config.settings import settings
+
+    original = (settings.ESCALATION_AUTO_SWEEP, settings.ESCALATION_SCHEDULER_ENABLED)
+    settings.ESCALATION_AUTO_SWEEP = False
+    settings.ESCALATION_SCHEDULER_ENABLED = False  # no lifespan scheduler task either
+    yield
+    settings.ESCALATION_AUTO_SWEEP, settings.ESCALATION_SCHEDULER_ENABLED = original
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _shared_test_client_ip_limits():
+    """Every TestClient request comes from the one address "testclient",
+    and the suite registers hundreds of users, so only the per-IP buckets
+    are lifted here. Per-account login limits stay active, and
+    test_auth_hardening.py sets explicit limits to test all of them."""
+    from config.settings import settings
+
+    original = (settings.LOGIN_MAX_FAILURES_PER_IP, settings.REGISTRATION_MAX_PER_IP)
+    settings.LOGIN_MAX_FAILURES_PER_IP = 1_000_000
+    settings.REGISTRATION_MAX_PER_IP = 1_000_000
+    yield
+    settings.LOGIN_MAX_FAILURES_PER_IP, settings.REGISTRATION_MAX_PER_IP = original
 
 
 @pytest.fixture(scope="session", autouse=True)

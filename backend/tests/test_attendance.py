@@ -1,7 +1,9 @@
 """Attendance module — check-in/check-out, leave, and team views."""
+from tests.helpers import complete_first_login
 
 EMP_BASE = "/api/v1/employee-management"
 ATT_BASE = "/api/v1/attendance"
+LEAVE_REQUESTS = "/api/v1/leave/requests"
 
 
 def _role_id(client, headers, name):
@@ -18,8 +20,7 @@ def _onboard(client, admin_headers, email, full_name="Test Employee", project_id
     assert r.status_code == 201, r.text
     temp_password = r.json()["temporary_password"]
     employee_id = r.json()["employee"]["id"]
-    login = client.post("/api/v1/auth/login", json={"email": email, "password": temp_password})
-    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    headers = complete_first_login(client, email, temp_password)
     return {"employee_id": employee_id, "headers": headers}
 
 
@@ -81,18 +82,29 @@ def test_leave_marking_excluded_from_checkin_rate(client, new_user, unique_email
     }).json()
     member = _onboard(client, admin["headers"], unique_email, project_id=project["id"])
 
-    # No check-ins at all, but the whole window is marked on_leave ->
-    # the business-day denominator should be fully excluded, so a manager
-    # viewing this employee shouldn't see them penalized for it.
-    r = client.post(f"{ATT_BASE}/leave", headers=member["headers"], json={
-        "start_date": "2026-01-05", "end_date": "2026-01-09", "reason": "Planned vacation",
-    })
-    assert r.status_code == 200, r.text
-    assert all(rec["status"] == "on_leave" for rec in r.json())
+    window = {"start_date": "2026-01-05", "end_date": "2026-01-09"}
 
-    detail = client.get(
-        f"{ATT_BASE}/employee/{member['employee_id']}", headers=admin["headers"],
-        params={"start_date": "2026-01-05", "end_date": "2026-01-09"},
-    )
+    # Self-marking leave was retired in Phase 4.3 — it bypassed approval.
+    r = client.post(f"{ATT_BASE}/leave", headers=member["headers"], json={**window, "reason": "Planned vacation"})
+    assert r.status_code == 410, r.text
+
+    # Leave now goes through approval; a pending request marks nothing yet.
+    r = client.post(LEAVE_REQUESTS, headers=member["headers"], json={
+        **window, "leave_type": "annual", "reason": "Planned vacation",
+    })
+    assert r.status_code == 201, r.text
+    request_id = r.json()["id"]
+    detail = client.get(f"{ATT_BASE}/employee/{member['employee_id']}", headers=admin["headers"], params=window)
     assert detail.status_code == 200, detail.text
+    assert detail.json()["checkin_rate"] == 0.0
+
+    # Once HR/Admin approves it, the whole window is on_leave -> the
+    # business-day denominator is fully excluded, so a manager viewing
+    # this employee doesn't see them penalized for it.
+    r = client.post(f"{LEAVE_REQUESTS}/{request_id}/approve", headers=admin["headers"], json={})
+    assert r.status_code == 200, r.text
+    detail = client.get(f"{ATT_BASE}/employee/{member['employee_id']}", headers=admin["headers"], params=window)
+    assert detail.status_code == 200, detail.text
+    assert all(rec["status"] == "on_leave" for rec in detail.json()["records"])
+    assert len(detail.json()["records"]) == 5
     assert detail.json()["checkin_rate"] == 1.0

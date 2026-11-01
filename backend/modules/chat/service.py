@@ -14,6 +14,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
 from core.authorization import assert_project_manager, is_team_lead_of
+from core.permissions import OVERRIDE_ROLES
 from models.chat_channel import ChatChannel
 from models.chat_channel_message import ChatChannelMessage
 from models.chat_group import ChatGroup
@@ -26,7 +27,8 @@ from models.user import User
 
 from modules.notifications.service import create_notification
 
-_OVERRIDE_ROLES = ("admin", "hr_manager")
+_OVERRIDE_ROLES = OVERRIDE_ROLES
+
 
 
 # ------------------------------------------------------------------ #
@@ -77,6 +79,28 @@ def list_contacts(db: Session, current_user: User, current_employee: Employee | 
                     "role": lead.user.role.name, "job_title": lead.job_title,
                 })
 
+        # Teammates on the same project
+        if current_employee.project_id is not None:
+            teammates = (
+                db.query(Employee)
+                .options(joinedload(Employee.user))
+                .filter(
+                    Employee.project_id == current_employee.project_id,
+                    Employee.deleted_at.is_(None),
+                )
+                .all()
+            )
+            for emp in teammates:
+                if emp.user_id in seen_user_ids:
+                    continue
+                seen_user_ids.add(emp.user_id)
+                contacts.append({
+                    "user_id": emp.user_id,
+                    "full_name": emp.user.full_name,
+                    "role": emp.user.role.name,
+                    "job_title": emp.job_title,
+                })
+
     # Everyone can always reach admin/hr_manager.
     admins = db.query(User).options(joinedload(User.role)).filter(User.deleted_at.is_(None)).all()
     for user in admins:
@@ -98,7 +122,11 @@ def can_open_chat(db: Session, current_user: User, current_employee: Employee | 
     other_employee = db.query(Employee).filter(Employee.user_id == other_user_id).first()
     if other_employee is None:
         return False
-    return is_team_lead_of(db, current_employee, other_employee) or is_team_lead_of(db, other_employee, current_employee)
+    if is_team_lead_of(db, current_employee, other_employee) or is_team_lead_of(db, other_employee, current_employee):
+        return True
+    if current_employee.project_id is not None and current_employee.project_id == other_employee.project_id:
+        return True
+    return False
 
 
 def _resolve_thread_parties(db: Session, current_user: User, current_employee: Employee | None, other_user_id: int) -> tuple[int, int]:
@@ -124,6 +152,17 @@ def _resolve_thread_parties(db: Session, current_user: User, current_employee: E
         return other_employee.id, current_user.id
     if other_is_manager and current_employee is not None:
         return current_employee.id, other_user.id
+
+    # If both are teammates on the same project
+    if (
+        current_employee is not None
+        and other_employee is not None
+        and current_employee.project_id is not None
+        and current_employee.project_id == other_employee.project_id
+    ):
+        emp1, emp2 = (current_employee, other_employee) if current_employee.id < other_employee.id else (other_employee, current_employee)
+        return emp1.id, emp2.user_id
+
     raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only message your own team lead, your project's members, or admin/HR.")
 
 
@@ -264,21 +303,28 @@ def _get_group_or_404(db: Session, group_id: int) -> ChatGroup:
 
 
 def _assert_group_member(db: Session, group: ChatGroup, current_user: User) -> ChatGroupMember | None:
-    """Raises 403 unless the caller is an actual member of this group, or
-    admin/hr_manager (the same standing override used everywhere else in
-    this app — attendance, sprints, review — for viewing a team they're
-    not literally staffed on). Returns None for an override caller who
-    has no real ChatGroupMember row; every caller only uses the return
-    value for the assertion's side effect, not its content."""
+    """Raises 403 unless the caller is an actual member of this project group, or
+    admin/hr_manager standing override."""
     if current_user.role.name in _OVERRIDE_ROLES:
         return None
+
+    emp = db.query(Employee).filter(Employee.user_id == current_user.id, Employee.deleted_at.is_(None)).first()
+    if emp is not None and emp.project_id != group.project_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You're not a member of this project group.")
+
     member = (
         db.query(ChatGroupMember)
         .filter(ChatGroupMember.group_id == group.id, ChatGroupMember.user_id == current_user.id)
         .first()
     )
     if member is None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "You're not a member of this group.")
+        if emp is not None and emp.project_id == group.project_id:
+            member = ChatGroupMember(group_id=group.id, user_id=current_user.id)
+            db.add(member)
+            db.commit()
+            db.refresh(member)
+        else:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "You're not a member of this group.")
     return member
 
 
@@ -337,16 +383,20 @@ def create_group(db: Session, current_user: User, current_employee: Employee | N
 def list_groups(db: Session, current_user: User) -> list[dict]:
     query = db.query(ChatGroup).options(joinedload(ChatGroup.project))
     if current_user.role.name in _OVERRIDE_ROLES:
-        # Standing override, same as attendance/sprints/review: see every
-        # group, not just ones they were explicitly added to.
         groups = query.order_by(ChatGroup.name).all()
     else:
-        group_ids = [
-            m.group_id for m in db.query(ChatGroupMember).filter(ChatGroupMember.user_id == current_user.id).all()
-        ]
-        if not group_ids:
-            return []
-        groups = query.filter(ChatGroup.id.in_(group_ids)).all()
+        emp = db.query(Employee).filter(Employee.user_id == current_user.id, Employee.deleted_at.is_(None)).first()
+        if emp is not None:
+            if emp.project_id is None:
+                return []
+            groups = query.filter(ChatGroup.project_id == emp.project_id).all()
+        else:
+            group_ids = [
+                m.group_id for m in db.query(ChatGroupMember).filter(ChatGroupMember.user_id == current_user.id).all()
+            ]
+            if not group_ids:
+                return []
+            groups = query.filter(ChatGroup.id.in_(group_ids)).all()
     return [_group_response(db, g, current_user) for g in groups]
 
 

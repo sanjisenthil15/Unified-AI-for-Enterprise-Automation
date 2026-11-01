@@ -84,10 +84,33 @@ export async function assignActionItem(id, actionItemId, userId) {
  * Turns an action item into an assigned Sprint task. The meeting must
  * already be linked to a project (see uploadMeeting's projectId).
  */
-export async function convertActionItem(id, actionItemId, { sprintId, assigneeId, dueDate }) {
+export async function confirmActionItem(id, actionItemId, { assigneeId, dueDate, finalDescription }) {
+  const res = await axiosInstance.post(
+    `/api/v1/meetings/${id}/action-items/${actionItemId}/confirm`,
+    {
+      assignee_id: assigneeId,
+      due_date: dueDate,
+      final_description: finalDescription || null,
+    },
+  );
+  return res.data;
+}
+
+export async function rejectActionItem(id, actionItemId, { rejectionReason }) {
+  const res = await axiosInstance.post(
+    `/api/v1/meetings/${id}/action-items/${actionItemId}/reject`,
+    { rejection_reason: rejectionReason },
+  );
+  return res.data;
+}
+
+export async function convertActionItem(id, actionItemId, { sprintId, assigneeId, dueDate } = {}) {
+  const payload = { sprint_id: sprintId };
+  if (assigneeId) payload.assignee_id = assigneeId;
+  if (dueDate) payload.due_date = dueDate;
   const res = await axiosInstance.post(
     `/api/v1/meetings/${id}/action-items/${actionItemId}/convert`,
-    { sprint_id: sprintId, assignee_id: assigneeId, due_date: dueDate || null },
+    payload,
   );
   return res.data;
 }

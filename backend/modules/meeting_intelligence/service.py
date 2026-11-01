@@ -10,15 +10,26 @@ are added in later phases via pipeline.py; nothing here starts processing.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, Callable
+from types import SimpleNamespace
 
 if TYPE_CHECKING:
     from modules.meeting_online.schemas import OnlineMeetingSession
 
 from fastapi import HTTPException, UploadFile, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from core.authorization import (
+    assert_can_link_project_meeting,
+    assert_can_review_action_items,
+    assert_can_view_meeting,
+)
+from modules.notifications.service import create_notification
+from modules.sprints import service as sprints_service
+
+from core.permissions import OVERRIDE_ROLES
 from models.employee import Employee
 from models.meeting import Meeting
 from models.meeting_action_item import MeetingActionItem
@@ -54,6 +65,7 @@ from modules.meeting_intelligence.storage import (
     FileTooLargeError,
     MeetingVideoStorage,
     StorageError,
+    StorageUnavailableError,
     UnsupportedMediaError,
     get_storage,
 )
@@ -110,6 +122,9 @@ def create_meeting(
     except FileTooLargeError as exc:
         db.rollback()
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, str(exc))
+    except StorageUnavailableError as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc))
     except (EmptyUploadError, StorageError) as exc:
         db.rollback()
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
@@ -209,15 +224,18 @@ def schedule_meeting(
 
 def list_scheduled_meetings(db: Session, current_user: User, current_employee: Employee | None) -> list[Meeting]:
     """Upcoming (status='scheduled') meetings visible to the caller:
-    admin/hr_manager see every scheduled meeting; everyone else sees only
+    admin/hr_manager/manager see every scheduled meeting; everyone else sees only
     ones they organized or were invited to."""
     query = db.query(Meeting).filter(Meeting.status == "scheduled")
-    if current_user.role.name not in ("admin", "hr_manager"):
+    role = getattr(current_user, "role", None)
+    role_name = getattr(role, "name", role)
+    if role_name not in OVERRIDE_ROLES:
         invited_ids = db.query(MeetingParticipant.meeting_id).filter(
             MeetingParticipant.user_id == current_user.id
         )
         query = query.filter((Meeting.created_by == current_user.id) | Meeting.id.in_(invited_ids))
     return query.order_by(Meeting.scheduled_at.asc()).all()
+
 
 
 def create_or_update_meeting_from_online_session(
@@ -337,6 +355,8 @@ def create_or_update_meeting_from_online_session(
                 assignment_method="unassigned",
                 priority=item.priority,
                 status="pending",
+                review_status="proposed",
+                is_legacy_conversion=False,
                 source="ai",
                 ai_confidence=item.confidence,
             ))
@@ -386,12 +406,59 @@ def get_owned_meeting(db: Session, meeting_id: int, user_id: int) -> Meeting:
     return meeting
 
 
-def list_meetings(db: Session, user_id: int, *, skip: int = 0, limit: int = 50) -> list[Meeting]:
-    """A user's meeting history, newest first."""
+def list_meetings(
+    db: Session,
+    user_or_id: User | int,
+    current_employee: Employee | None = None,
+    *,
+    skip: int = 0,
+    limit: int = 50,
+) -> list[Meeting]:
+    """Meeting history filtered by caller's permissions, newest first."""
+    if isinstance(user_or_id, int):
+        current_user = db.query(User).filter(User.id == user_or_id).first()
+        if current_user is None:
+            return []
+    else:
+        current_user = user_or_id
+
+    role_name = getattr(current_user.role, "name", None) if hasattr(current_user, "role") else None
+
+    if role_name == "admin":
+        # Admin sees own unlinked meetings + all project-linked meetings
+        query = db.query(Meeting).filter(
+            or_(
+                Meeting.created_by == current_user.id,
+                Meeting.project_id.isnot(None),
+            )
+        )
+    else:
+        allowed_project_ids: set[int] = set()
+        if role_name == "manager":
+            mgr_pids = db.query(Project.id).filter(Project.manager_user_id == current_user.id).all()
+            allowed_project_ids.update(p[0] for p in mgr_pids)
+
+        if current_employee is None:
+            current_employee = db.query(Employee).filter(Employee.user_id == current_user.id).first()
+
+        if current_employee is not None:
+            tl_pids = db.query(Project.id).filter(Project.team_lead_id == current_employee.id).all()
+            allowed_project_ids.update(p[0] for p in tl_pids)
+            if current_employee.project_id is not None:
+                allowed_project_ids.add(current_employee.project_id)
+
+        if allowed_project_ids:
+            query = db.query(Meeting).filter(
+                or_(
+                    Meeting.created_by == current_user.id,
+                    Meeting.project_id.in_(allowed_project_ids),
+                )
+            )
+        else:
+            query = db.query(Meeting).filter(Meeting.created_by == current_user.id)
+
     return (
-        db.query(Meeting)
-        .filter(Meeting.created_by == user_id)
-        .order_by(Meeting.created_at.desc(), Meeting.id.desc())
+        query.order_by(Meeting.created_at.desc(), Meeting.id.desc())
         .offset(max(skip, 0))
         .limit(min(max(limit, 1), 200))
         .all()
@@ -469,52 +536,216 @@ def assign_action_item(
     return item
 
 
-def convert_action_item_to_task(
-    db: Session, current_user: User, current_employee,
-    meeting: Meeting, action_item_id: int, sprint_id: int, assignee_id: int, due_date,
+def confirm_action_item(
+    db: Session,
+    current_user: User,
+    current_employee: Employee | None,
+    meeting: Meeting,
+    action_item_id: int,
+    assignee_id: int,
+    due_date: date,
+    final_description: str | None = None,
 ) -> MeetingActionItem:
-    """Turns an action item into an assigned Sprint task. Reuses
-    modules/sprints/service.py's own task-creation logic (and its
-    authorization: the caller must be that sprint's project's team lead,
-    or admin/hr_manager) rather than duplicating it here. Idempotent via
-    converted_sprint_task_id — calling this twice on an already-converted
-    item just raises a 409 rather than creating a duplicate task."""
-    from types import SimpleNamespace
-
-    from modules.sprints import service as sprints_service
-
-    if meeting.project_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This meeting isn't linked to a project yet — link it first.")
+    """
+    Approves an action item: sets assignee, deadline, optional final description,
+    advances status from proposed to confirmed, and records human reviewer attribution.
+    """
+    assert_can_review_action_items(db, meeting, current_user, current_employee)
 
     item = (
         db.query(MeetingActionItem)
         .filter(MeetingActionItem.id == action_item_id, MeetingActionItem.meeting_id == meeting.id)
+        .with_for_update()
         .first()
     )
     if item is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Action item id={action_item_id} not found.")
-    if item.converted_sprint_task_id is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "This action item was already converted into a Sprint task.")
 
-    sprint = sprints_service.get_sprint(db, sprint_id)
-    if sprint.project_id != meeting.project_id:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "sprint_id must belong to this meeting's project.")
+    if item.review_status != "proposed":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Cannot confirm action item in '{item.review_status}' status; only 'proposed' items can be confirmed.",
+        )
 
-    task_payload = SimpleNamespace(
-        title=item.description[:200],
-        description=item.description,
-        assignee_id=assignee_id,
-        due_date=due_date,
-    )
-    task = sprints_service.create_task(db, current_user, current_employee, sprint_id, task_payload)
+    assignee = db.query(Employee).filter(
+        Employee.id == assignee_id,
+        Employee.deleted_at.is_(None),
+    ).first()
+    if assignee is None or assignee.project_id != meeting.project_id or assignee.status != "active":
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "assignee_id must be an active member of this meeting's project.",
+        )
 
-    item.converted_sprint_task_id = task["id"]
-    item.assigned_to_employee_id = assignee_id
+    if due_date is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "due_date is required to confirm an action item.",
+        )
+
+    item.assigned_to_employee_id = assignee.id
+    item.assigned_to_user_id = assignee.user_id
     item.assignment_method = "manual"
-    if due_date is not None:
-        item.due_date = due_date
+    item.due_date = due_date
+    clean_desc = final_description.strip() if final_description and final_description.strip() else item.description
+    item.final_description = clean_desc
+    item.review_status = "confirmed"
+    item.reviewed_by_id = current_user.id
+    item.reviewed_at = datetime.now(timezone.utc)
+    item.rejection_reason = None
+
     db.commit()
     db.refresh(item)
+    return item
+
+
+def reject_action_item(
+    db: Session,
+    current_user: User,
+    current_employee: Employee | None,
+    meeting: Meeting,
+    action_item_id: int,
+    rejection_reason: str,
+) -> MeetingActionItem:
+    """
+    Rejects a proposed action item with a mandatory non-empty reason and records reviewer attribution.
+    Terminal state.
+    """
+    assert_can_review_action_items(db, meeting, current_user, current_employee)
+
+    item = (
+        db.query(MeetingActionItem)
+        .filter(MeetingActionItem.id == action_item_id, MeetingActionItem.meeting_id == meeting.id)
+        .with_for_update()
+        .first()
+    )
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Action item id={action_item_id} not found.")
+
+    if item.review_status != "proposed":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Cannot reject action item in '{item.review_status}' status; only 'proposed' items can be rejected.",
+        )
+
+    if not rejection_reason or not rejection_reason.strip():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "rejection_reason is required and cannot be empty.",
+        )
+
+    item.review_status = "rejected"
+    item.rejection_reason = rejection_reason.strip()
+    item.reviewed_by_id = current_user.id
+    item.reviewed_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def convert_action_item_to_task(
+    db: Session,
+    current_user: User,
+    current_employee: Employee | None,
+    meeting: Meeting,
+    action_item_id: int,
+    sprint_id: int,
+    assignee_id: int | None = None,
+    due_date: date | None = None,
+) -> MeetingActionItem:
+    """
+    Converts a confirmed action item into a Sprint task atomically in a single transaction.
+    """
+    assert_can_review_action_items(db, meeting, current_user, current_employee)
+
+    if meeting.project_id is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Cannot convert action items for a meeting not linked to a project.",
+        )
+
+    # Acquire parent Project FOR SHARE lock FIRST before locking child rows
+    project = sprints_service._get_project_with_share_lock(db, meeting.project_id)
+    sprints_service._assert_project_active(project)
+
+    item = (
+        db.query(MeetingActionItem)
+        .filter(MeetingActionItem.id == action_item_id, MeetingActionItem.meeting_id == meeting.id)
+        .with_for_update()
+        .first()
+    )
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Action item id={action_item_id} not found.")
+
+    if item.review_status == "converted" or item.converted_sprint_task_id is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This action item has already been converted into a Sprint task.",
+        )
+
+    if item.review_status != "confirmed":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Only 'confirmed' action items can be converted into sprint tasks (current: '{item.review_status}').",
+        )
+
+    target_assignee_id = assignee_id or item.assigned_to_employee_id
+    target_due_date = due_date or item.due_date
+
+    if target_assignee_id is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Action item must have an assignee before conversion.",
+        )
+    if target_due_date is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Action item must have a due date before conversion.",
+        )
+
+    task_desc = item.final_description or item.description
+    task_title = task_desc[:200]
+    task_payload = SimpleNamespace(
+        title=task_title,
+        description=task_desc,
+        assignee_id=target_assignee_id,
+        due_date=target_due_date,
+    )
+
+    task, sprint, assignee = sprints_service._create_task_without_commit(
+        db=db,
+        current_user=current_user,
+        current_employee=current_employee,
+        sprint_id=sprint_id,
+        payload=task_payload,
+        validate_project_id=meeting.project_id,
+    )
+
+    item.converted_sprint_task_id = task.id
+    item.review_status = "converted"
+    item.assigned_to_employee_id = target_assignee_id
+    if assignee:
+        item.assigned_to_user_id = assignee.user_id
+    item.due_date = target_due_date
+    if item.reviewed_by_id is None:
+        item.reviewed_by_id = current_user.id
+    if item.reviewed_at is None:
+        item.reviewed_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(item)
+
+    if assignee is not None:
+        try:
+            create_notification(
+                db, assignee.user_id, "task_assigned",
+                f"You were assigned '{task.title}' in sprint '{sprint.name}'.",
+                f"/sprints?project_id={sprint.project_id}",
+            )
+        except Exception:
+            pass
+
     return item
 
 
@@ -760,12 +991,14 @@ def analyze_meeting(
         )
         raise HTTPException(code, f"Meeting analysis failed: {exc}")
 
-    # Reprocess-safe: drop untouched AI action items + the old analysis.
+    # Reprocess-safe: drop untouched proposed AI action items + the old analysis.
+    # Confirmed, rejected, and converted items are never deleted.
     db.query(MeetingActionItem).filter(
         MeetingActionItem.meeting_id == meeting_id,
         MeetingActionItem.source == "ai",
         MeetingActionItem.assignment_method == "unassigned",
-        MeetingActionItem.status == "pending",
+        MeetingActionItem.review_status == "proposed",
+        MeetingActionItem.reviewed_by_id.is_(None),
     ).delete(synchronize_session=False)
     old = db.query(MeetingAnalysis).filter(
         MeetingAnalysis.meeting_id == meeting_id
@@ -796,6 +1029,8 @@ def analyze_meeting(
             assignment_method="unassigned",
             priority=item.priority,
             status="pending",
+            review_status="proposed",
+            is_legacy_conversion=False,
             source="ai",
             ai_confidence=item.confidence,
         ))

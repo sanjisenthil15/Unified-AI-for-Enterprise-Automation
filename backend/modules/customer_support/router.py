@@ -46,12 +46,11 @@ Endpoints:
 
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from config.database import get_db
-from core.dependencies import get_current_user
-from models.role import Role
+from core.dependencies import get_current_user, require_roles
+from core.permissions import SUPPORT_FULL_ACCESS_ROLES, SUPPORT_MANAGE_ROLES
 from models.user import User
 from modules.customer_support import service
 from modules.customer_support.schemas import (
@@ -92,44 +91,6 @@ from modules.customer_support.schemas import (
     TicketUpdateRequest,
 )
 
-# -----------------------------------------------------------------------------
-# Development Authentication Helper
-# -----------------------------------------------------------------------------
-_optional_bearer = HTTPBearer(auto_error=False)
-
-
-def get_dev_or_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_optional_bearer),
-    db: Session = Depends(get_db),
-) -> User:
-    """Returns user from token, or default dev admin in development."""
-    if credentials and credentials.credentials:
-        try:
-            return get_current_user(credentials=credentials, db=db)
-        except Exception:
-            pass
-    dev_role = Role(id=1, name="admin", description="Development Administrator")
-    return User(
-        id=1,
-        full_name="Dev Admin",
-        email="admin@enterprise.ai",
-        is_active=True,
-        role=dev_role,
-    )
-
-
-def require_roles_dev(allowed_roles: List[str]):
-    def _check(current_user: User = Depends(get_dev_or_current_user)) -> User:
-        user_role_name = current_user.role.name if (current_user and current_user.role) else "admin"
-        if user_role_name not in allowed_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access denied. Required role(s): {', '.join(allowed_roles)}. Your role: {user_role_name}.",
-            )
-        return current_user
-    return _check
-
-
 router = APIRouter(prefix="/customer-support", tags=["Customer Support AI Platform"])
 
 
@@ -150,7 +111,7 @@ def customer_support_health() -> dict:
 @router.get("/stats", response_model=CustomerSupportStats, summary="Customer support operational statistics")
 def customer_support_stats(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.get_customer_support_stats(db=db)
 
@@ -158,11 +119,14 @@ def customer_support_stats(
 @router.get("/global-search", response_model=GlobalSearchResponse, summary="Cross-entity customer support search")
 def global_customer_support_search(
     q: str = Query(..., min_length=1, description="Query text to search across KB, tickets, categories"),
+    skip: int = Query(0, ge=0),
     limit: int = Query(15, ge=1, le=50),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.global_customer_support_search(db=db, query=q, limit=limit)
+    return service.global_customer_support_search(
+        db=db, query=q, current_user=current_user, skip=skip, limit=limit
+    )
 
 
 # =============================================================================
@@ -178,7 +142,7 @@ def global_customer_support_search(
 def create_knowledge_document(
     payload: KnowledgeDocumentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles_dev(["admin", "support_agent"])),
+    current_user: User = Depends(require_roles(SUPPORT_MANAGE_ROLES)),
 ):
     return service.create_knowledge_document(db=db, payload=payload, created_by_id=current_user.id)
 
@@ -196,7 +160,7 @@ def list_knowledge_documents(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.list_knowledge_documents(
         db=db,
@@ -221,7 +185,7 @@ def search_knowledge_base(
     min_score: float = Query(0.15, ge=0.0, le=1.0),
     limit: int = Query(5, ge=1, le=50),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.search_knowledge_base(
         db=db,
@@ -241,7 +205,7 @@ def search_knowledge_base(
 def get_knowledge_document(
     document_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.get_knowledge_document(db=db, document_id=document_id)
 
@@ -255,7 +219,7 @@ def update_knowledge_document(
     document_id: int,
     payload: KnowledgeDocumentUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles_dev(["admin", "support_agent"])),
+    current_user: User = Depends(require_roles(SUPPORT_MANAGE_ROLES)),
 ):
     return service.update_knowledge_document(db=db, document_id=document_id, payload=payload)
 
@@ -268,7 +232,7 @@ def update_knowledge_document(
 def delete_knowledge_document(
     document_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles_dev(["admin", "support_agent"])),
+    current_user: User = Depends(require_roles(SUPPORT_MANAGE_ROLES)),
 ):
     service.delete_knowledge_document(db=db, document_id=document_id)
 
@@ -281,7 +245,7 @@ def delete_knowledge_document(
 def publish_knowledge_document(
     document_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles_dev(["admin", "support_agent"])),
+    current_user: User = Depends(require_roles(SUPPORT_MANAGE_ROLES)),
 ):
     return service.set_document_publication(db=db, document_id=document_id, is_published=True)
 
@@ -294,7 +258,7 @@ def publish_knowledge_document(
 def unpublish_knowledge_document(
     document_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles_dev(["admin", "support_agent"])),
+    current_user: User = Depends(require_roles(SUPPORT_MANAGE_ROLES)),
 ):
     return service.set_document_publication(db=db, document_id=document_id, is_published=False)
 
@@ -307,7 +271,7 @@ def unpublish_knowledge_document(
 def reindex_knowledge_document(
     document_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles_dev(["admin", "support_agent"])),
+    current_user: User = Depends(require_roles(SUPPORT_MANAGE_ROLES)),
 ):
     return service.reindex_knowledge_document(db=db, document_id=document_id)
 
@@ -319,7 +283,7 @@ def reindex_knowledge_document(
 @router.get("/categories", response_model=List[SupportCategoryResponse], summary="List support issue categories")
 def list_categories(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.list_support_categories(db=db)
 
@@ -328,7 +292,7 @@ def list_categories(
 def create_category(
     payload: SupportCategoryCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles_dev(["admin", "support_agent"])),
+    current_user: User = Depends(require_roles(SUPPORT_MANAGE_ROLES)),
 ):
     return service.create_support_category(db=db, payload=payload)
 
@@ -336,7 +300,7 @@ def create_category(
 @router.get("/teams", response_model=List[SupportTeamResponse], summary="List support resolution teams")
 def list_teams(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.list_support_teams(db=db)
 
@@ -345,7 +309,7 @@ def list_teams(
 def create_team(
     payload: SupportTeamCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles_dev(["admin", "support_agent"])),
+    current_user: User = Depends(require_roles(SUPPORT_MANAGE_ROLES)),
 ):
     return service.create_support_team(db=db, payload=payload)
 
@@ -358,7 +322,7 @@ def create_team(
 def create_chat_session(
     payload: Optional[CreateChatSessionRequest] = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.create_chat_session(db=db, payload=payload, user_id=current_user.id)
 
@@ -367,7 +331,7 @@ def create_chat_session(
 def list_chat_sessions(
     limit: int = Query(30, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.list_chat_sessions(db=db, user_id=current_user.id, limit=limit)
 
@@ -376,7 +340,7 @@ def list_chat_sessions(
 def get_chat_session(
     session_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.get_chat_session(db=db, session_id=session_id)
 
@@ -385,7 +349,7 @@ def get_chat_session(
 def delete_chat_session(
     session_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     service.delete_chat_session(db=db, session_id=session_id)
 
@@ -394,7 +358,7 @@ def delete_chat_session(
 def send_chat_message(
     payload: ChatMessageRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.send_chat_message(db=db, payload=payload, user_id=current_user.id)
 
@@ -404,7 +368,7 @@ def submit_chat_feedback(
     message_id: int,
     payload: ChatFeedbackRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.submit_chat_feedback(db=db, message_id=message_id, payload=payload)
 
@@ -413,7 +377,7 @@ def submit_chat_feedback(
 def generate_agent_handoff(
     session_id: str = Query(..., description="Chat session ID"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.generate_agent_handoff(db=db, session_id=session_id)
 
@@ -426,7 +390,7 @@ def generate_agent_handoff(
 def create_support_ticket(
     payload: TicketCreateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.create_support_ticket(db=db, payload=payload, submitted_by_id=current_user.id)
 
@@ -440,10 +404,11 @@ def list_support_tickets(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.list_support_tickets(
         db=db,
+        current_user=current_user,
         status_filter=status,
         priority_filter=priority,
         category_id=category_id,
@@ -457,9 +422,9 @@ def list_support_tickets(
 def get_support_ticket(
     ticket_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.get_support_ticket(db=db, ticket_id=ticket_id)
+    return service.get_support_ticket(db=db, ticket_id=ticket_id, current_user=current_user)
 
 
 @router.put("/tickets/{ticket_id}", response_model=TicketDetailResponse, summary="Update ticket status / priority / assignee")
@@ -467,9 +432,10 @@ def update_support_ticket(
     ticket_id: int,
     payload: TicketUpdateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(require_roles(SUPPORT_FULL_ACCESS_ROLES)),
 ):
-    return service.update_support_ticket(db=db, ticket_id=ticket_id, payload=payload)
+    return service.update_support_ticket(db=db, ticket_id=ticket_id, payload=payload, current_user=current_user)
+
 
 
 @router.post("/tickets/{ticket_id}/messages", response_model=TicketMessageResponse, summary="Post message to ticket thread")
@@ -477,16 +443,18 @@ def add_ticket_message(
     ticket_id: int,
     payload: TicketMessageRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.add_ticket_message(db=db, ticket_id=ticket_id, payload=payload, sender_id=current_user.id)
+    return service.add_ticket_message(
+        db=db, ticket_id=ticket_id, payload=payload, sender_id=current_user.id, current_user=current_user
+    )
 
 
 @router.post("/tickets/escalate", response_model=TicketResponse, summary="Escalate active chat session to a support ticket")
 def escalate_chat_to_ticket(
     payload: TicketEscalateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.escalate_chat_to_ticket(db=db, payload=payload, submitted_by_id=current_user.id)
 
@@ -502,7 +470,7 @@ def escalate_chat_to_ticket(
 )
 def get_service_status(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.get_service_statuses(db=db)
 
@@ -514,7 +482,7 @@ def get_service_status(
 )
 def list_active_incidents(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.get_active_incidents(db=db)
 
@@ -527,7 +495,7 @@ def list_active_incidents(
 def get_incident_detail(
     incident_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.get_incident_detail(db=db, incident_id=incident_id)
 
@@ -544,7 +512,7 @@ def get_incident_detail(
 def analyze_support_request(
     payload: SupportRequestAnalysisRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     return service.analyze_support_request(db=db, payload=payload)
 
@@ -560,10 +528,14 @@ def analyze_support_request(
 )
 def list_notifications(
     filter: Optional[str] = Query(None, description="Filter by type (all, unread, ticket, incident, sla)"),
+    before_id: Optional[int] = Query(None, description="Pagination cursor: return items before this ID"),
+    limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.list_notifications(db=db, filter_type=filter)
+    return service.list_notifications(
+        db=db, current_user=current_user, filter_type=filter, before_id=before_id, limit=limit
+    )
 
 
 @router.post(
@@ -573,9 +545,11 @@ def list_notifications(
 def mark_notification_read(
     notification_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.mark_notification_read(db=db, notification_id=notification_id)
+    return service.mark_notification_read(
+        db=db, notification_id=notification_id, current_user=current_user
+    )
 
 
 @router.post(
@@ -584,9 +558,9 @@ def mark_notification_read(
 )
 def mark_all_notifications_read(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.mark_all_notifications_read(db=db)
+    return service.mark_all_notifications_read(db=db, current_user=current_user)
 
 
 @router.get(
@@ -596,9 +570,9 @@ def mark_all_notifications_read(
 )
 def get_notification_preferences(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.get_notification_preferences(db=db)
+    return service.get_notification_preferences(db=db, current_user=current_user)
 
 
 @router.put(
@@ -609,7 +583,7 @@ def get_notification_preferences(
 def update_notification_preferences(
     payload: NotificationPreferences,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_dev_or_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    return service.update_notification_preferences(db=db, payload=payload)
+    return service.update_notification_preferences(db=db, payload=payload, current_user=current_user)
 

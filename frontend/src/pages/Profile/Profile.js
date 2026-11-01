@@ -8,12 +8,14 @@
 
 import React, { useEffect, useState } from 'react';
 import { getMyEmployeeRecord } from '../../api/employeeApi';
+import ChangePasswordForm from '../ChangePassword/ChangePasswordForm';
 import '../Recruitment/Recruitment.css';
 
 export default function Profile() {
   const [employee, setEmployee] = useState(null);
   const [notOnboarded, setNotOnboarded] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [passwordChanged, setPasswordChanged] = useState(false);
 
   useEffect(() => {
     getMyEmployeeRecord()
@@ -50,6 +52,19 @@ export default function Profile() {
             <dt style={{ fontWeight: 600 }}>Status</dt><dd><span className="badge green">{employee.status}</span></dd>
           </dl>
         ) : null}
+      </div>
+
+      <div className="content-panel cp-profile-panel">
+        <h2>Change password</h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginBottom: '1rem' }}>
+          Changing your password signs you out everywhere else.
+        </p>
+        {passwordChanged && (
+          <div className="cp-alert cp-alert-success" role="status">
+            Password updated. Your other sessions have been signed out.
+          </div>
+        )}
+        <ChangePasswordForm onSuccess={() => setPasswordChanged(true)} />
       </div>
     </div>
   );

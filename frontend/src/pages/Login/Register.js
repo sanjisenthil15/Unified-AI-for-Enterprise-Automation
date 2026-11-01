@@ -14,9 +14,9 @@
  * Styled to match Login.js (same login-page / login-form classes).
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { registerUser } from '../../api/authApi';
+import { getRegistrationStatus, registerUser } from '../../api/authApi';
 import './Login.css';
 
 const MODULES = [
@@ -36,6 +36,13 @@ export default function Register() {
   const [password, setPassword] = useState('');
   const [error,    setError]    = useState('');
   const [loading,  setLoading]  = useState(false);
+  const [registrationOpen, setRegistrationOpen] = useState(null); // null = checking
+
+  useEffect(() => {
+    let active = true;
+    getRegistrationStatus().then((open) => { if (active) setRegistrationOpen(open); });
+    return () => { active = false; };
+  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -92,6 +99,14 @@ export default function Register() {
           <p>Sign up to join meetings and use the platform</p>
         </div>
 
+        {registrationOpen === false && (
+          <div className="login-error" role="status">
+            Self-registration is turned off. Accounts are created by HR or an administrator —
+            ask them to set one up for you, then sign in with the temporary password they give you.
+          </div>
+        )}
+
+        {registrationOpen === true && (
         <form className="login-form" onSubmit={handleSubmit} noValidate aria-label="Registration form">
           <div className="form-group">
             <label htmlFor="fullName">Full name</label>
@@ -158,6 +173,7 @@ export default function Register() {
             {loading ? 'Creating account…' : 'Create account →'}
           </button>
         </form>
+        )}
 
         <p className="login-footer">
           Need a role beyond basic access? Ask your admin or HR to add you via Employee Management.

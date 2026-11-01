@@ -10,6 +10,7 @@ payloads) are deliberately NOT exposed.
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -147,17 +148,25 @@ class AnalysisResponse(BaseModel):
 class ActionItemOut(BaseModel):
     id: int
     description: str
-    assignee_name_raw: str | None = None
-    assigned_to_user_id: int | None = None
-    assigned_to_employee_id: int | None = None
+    final_description: Optional[str] = None
+    assignee_name_raw: Optional[str] = None
+    assigned_to_user_id: Optional[int] = None
+    assigned_to_employee_id: Optional[int] = None
     assignment_method: str
-    due_date: date | None = None
-    priority: str | None = None
+    due_date: Optional[date] = None
+    priority: Optional[str] = None
     status: str
+    review_status: str = "proposed"
+    reviewed_by_id: Optional[int] = None
+    reviewed_by_name: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
+    is_legacy_conversion: bool = False
     source: str
-    ai_confidence: float | None = None
-    converted_sprint_task_id: int | None = None
+    ai_confidence: Optional[float] = None
+    converted_sprint_task_id: Optional[int] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -168,11 +177,21 @@ class AssignActionItem(BaseModel):
     )
 
 
+class ConfirmActionItem(BaseModel):
+    assignee_id: int = Field(..., description="Employee id to assign the action item to")
+    due_date: date = Field(..., description="Mandatory deadline for confirmed action item")
+    final_description: Optional[str] = Field(None, description="Optional human-edited description")
+
+
+class RejectActionItem(BaseModel):
+    rejection_reason: str = Field(..., min_length=1, description="Mandatory non-empty reason for rejecting")
+
+
+class ConvertActionItemReq(BaseModel):
+    sprint_id: int = Field(..., description="Sprint id belonging to the meeting's project")
+
+
 class ConvertActionItem(BaseModel):
-    """Turns a meeting action item into an assigned Sprint task. Requires
-    the meeting to have a project_id. sprint_id must belong to that
-    project — ordinary Sprint authorization (that project's team lead, or
-    admin/hr_manager) applies, same as creating a task directly."""
-    sprint_id: int
-    assignee_id: int = Field(..., description="Employee id to assign the new Sprint task to")
-    due_date: date | None = None
+    sprint_id: int = Field(..., description="Sprint id belonging to the meeting's project")
+    assignee_id: Optional[int] = Field(None, description="Optional override assignee id")
+    due_date: Optional[date] = Field(None, description="Optional override due date")

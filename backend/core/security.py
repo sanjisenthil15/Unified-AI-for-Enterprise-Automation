@@ -11,6 +11,7 @@ All JWT parameters are read from config/settings.py.
 No secrets are hard-coded in this file.
 """
 
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -18,6 +19,35 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from config.settings import settings
+
+
+# ------------------------------------------------------------------ #
+# Password policy
+# ------------------------------------------------------------------ #
+PASSWORD_MIN_LENGTH = 8
+# bcrypt only looks at the first 72 bytes and silently ignores the rest, so
+# anything longer is rejected outright rather than quietly truncated.
+PASSWORD_MAX_BYTES = 72
+
+
+def validate_password_policy(password: str) -> str:
+    """Single source of truth for user-chosen passwords (registration,
+    password change). Raises ValueError with a user-facing message."""
+    if len(password) < PASSWORD_MIN_LENGTH:
+        raise ValueError(f"Password must be at least {PASSWORD_MIN_LENGTH} characters.")
+    if len(password.encode("utf-8")) > PASSWORD_MAX_BYTES:
+        raise ValueError(f"Password must be at most {PASSWORD_MAX_BYTES} bytes.")
+    if not any(c.isupper() for c in password):
+        raise ValueError("Password must contain at least one uppercase letter.")
+    if not any(c.isdigit() for c in password):
+        raise ValueError("Password must contain at least one digit.")
+    return password
+
+
+def generate_temporary_password() -> str:
+    """Cryptographically secure one-time password for onboarding and
+    administrative resets (~12 URL-safe chars, well under 72 bytes)."""
+    return secrets.token_urlsafe(9)
 
 
 # ------------------------------------------------------------------ #
@@ -101,6 +131,19 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         algorithm=settings.ALGORITHM,
     )
     return encoded_jwt
+
+
+def create_user_access_token(user) -> str:
+    """Issue a session token for `user`. The `ver` claim snapshots
+    user.token_version; bumping that column in the database (password
+    change, admin reset) invalidates every token issued before it — see
+    core.dependencies._resolve_user."""
+    return create_access_token({
+        "sub": str(user.id),
+        "email": user.email,
+        "role": user.role.name,
+        "ver": user.token_version or 0,
+    })
 
 
 def verify_access_token(token: str) -> dict:

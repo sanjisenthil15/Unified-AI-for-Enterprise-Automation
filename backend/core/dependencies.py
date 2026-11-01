@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from config.database import get_db
 from config.settings import settings
+from core.audit import set_actor
 from core.security import verify_access_token
 from models.employee import Employee
 from models.user import User
@@ -56,29 +57,31 @@ def _dev_user(db: Session) -> User:
 # Core authentication dependency
 # ------------------------------------------------------------------ #
 
-def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
-    db: Session = Depends(get_db),
-) -> User:
+# Machine-readable 403 code the frontend uses to route to the mandatory
+# Change Password screen (distinct from ordinary permission 403s).
+PASSWORD_CHANGE_REQUIRED = "password_change_required"
+
+
+def _resolve_user(credentials: Optional[HTTPAuthorizationCredentials], db: Session) -> User:
     """
-    FastAPI dependency that validates the JWT in the Authorization header
-    and returns the corresponding active User ORM object.
+    Validates the JWT and returns the active User it identifies.
 
     Raises HTTP 401 when:
       - The Authorization header is missing or malformed
       - The token signature is invalid or expired
       - The token payload is missing expected claims
       - No user with the encoded ID exists in the database
+      - The token's `ver` no longer matches users.token_version (the
+        password was changed or reset after this token was issued)
 
     Raises HTTP 403 when:
       - The user account is deactivated (is_active = False)
-
-    Returns:
-        The authenticated User ORM instance with role eagerly loaded.
     """
     # Dev bypass — treat every request as the seeded demo admin.
     if settings.AUTH_DISABLED:
-        return _dev_user(db)
+        user = _dev_user(db)
+        set_actor(user)
+        return user
 
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -89,17 +92,20 @@ def get_current_user(
     if credentials is None:
         raise credentials_exception
 
-    # Step 1: Decode and validate the JWT
+    # Step 1: Decode and validate the JWT. Tokens issued before session
+    # versioning existed carry no `ver` claim and count as version 0, so
+    # deploying this doesn't log everyone out.
     try:
         payload = verify_access_token(credentials.credentials)
         user_id_str: str = payload.get("sub")
         if user_id_str is None:
             raise credentials_exception
         user_id = int(user_id_str)
-    except (JWTError, ValueError):
+        token_version = int(payload.get("ver", 0))
+    except (JWTError, ValueError, TypeError):
         raise credentials_exception
 
-    # Step 2: Load the user from the database, joining the role
+    # Step 2: Load the user from the database
     user: User | None = (
         db.query(User)
         .filter(User.id == user_id, User.deleted_at.is_(None))
@@ -108,14 +114,55 @@ def get_current_user(
     if user is None:
         raise credentials_exception
 
-    # Step 3: Ensure the account is active
+    # Step 3: Reject sessions revoked by a password change or admin reset
+    if token_version != (user.token_version or 0):
+        raise credentials_exception
+
+    # Step 4: Ensure the account is active
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is disabled. Please contact your administrator.",
         )
 
+    # Every audit row written during this request names this user.
+    set_actor(user)
     return user
+
+
+def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    """
+    The standard authentication dependency for every application API.
+
+    In addition to the checks in _resolve_user, accounts still using an
+    HR-issued temporary password are blocked with
+    403 {"code": "password_change_required"} until they set their own —
+    only /auth/me and /auth/change-password (which use
+    get_current_user_allow_password_change) remain reachable.
+    """
+    user = _resolve_user(credentials, db)
+    if user.must_change_password and not settings.AUTH_DISABLED:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": PASSWORD_CHANGE_REQUIRED,
+                "message": "You must change your temporary password before continuing.",
+            },
+        )
+    return user
+
+
+def get_current_user_allow_password_change(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    """Same authentication as get_current_user, but lets accounts that
+    must change their temporary password through. Use ONLY on the routes
+    needed to complete that change (/auth/me, /auth/change-password)."""
+    return _resolve_user(credentials, db)
 
 
 # ------------------------------------------------------------------ #
