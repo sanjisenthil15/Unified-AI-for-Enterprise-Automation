@@ -176,7 +176,16 @@ def run_setup(credential_output_path: str = None):
                 "expected": EXPECTED_LEADS.get(pname),
             }
 
-        # 6. Verify Manager assignments
+        # 6. Ensure Customer Support categories & teams are seeded into PostgreSQL
+        try:
+            from modules.customer_support.seed_data import seed_demo_knowledge_data
+            admin = db.query(User).first()
+            cs_stats = seed_demo_knowledge_data(db, author_id=admin.id if admin else None)
+            print(f"[Customer Support] Seeded: {cs_stats}")
+        except Exception as e:
+            print(f"[Customer Support] Seed notice: {e}")
+
+        # 7. Verify Manager assignments
         verified_projects = []
         for pname in PROJECT_NAMES:
             p = db.query(Project).filter(Project.name == pname).first()
