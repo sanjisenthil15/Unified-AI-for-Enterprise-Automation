@@ -130,6 +130,7 @@ export default function IncidentManagement() {
     teamId: '',
     teamName: '',
     userId: '',
+    deadline: '',
     notes: '',
     aiSuggestedTeam: '',
     matchedAiTeamId: '',
@@ -223,11 +224,17 @@ export default function IncidentManagement() {
           setActionBusy(false);
           return;
         }
+        if (!assignForm.deadline) {
+          setActionMsg({ type: 'error', text: 'Please set a deadline for this incident assignment.' });
+          setActionBusy(false);
+          return;
+        }
         updated = await assignIncident(selected.id, {
           assigned_to: uid,
           team_id: assignForm.teamId,
           team_name: assignForm.teamName,
           ai_recommended_team: assignForm.aiSuggestedTeam,
+          deadline: assignForm.deadline,
           notes: assignForm.notes,
         });
       } else if (actionModal === 'resolve') {
@@ -339,11 +346,13 @@ export default function IncidentManagement() {
       const initialTeamId = initialTeam ? initialTeam.id : '';
       const initialTeamName = initialTeam ? initialTeam.name : '';
       const matchedId = matched ? matched.id : '';
+      const defaultDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
       setAssignForm({
         teamId: initialTeamId,
         teamName: initialTeamName,
         userId: '',
+        deadline: defaultDeadline,
         notes: '',
         aiSuggestedTeam: suggested,
         matchedAiTeamId: matchedId,
@@ -1012,6 +1021,23 @@ export default function IncidentManagement() {
                   )}
                 </div>
 
+                {/* Deadline */}
+                <div className="field-group" style={{ marginBottom: '1rem' }}>
+                  <label htmlFor="inc-assign-deadline">Assignment Deadline *</label>
+                  <input
+                    id="inc-assign-deadline"
+                    type="date"
+                    className="field-input"
+                    value={assignForm.deadline}
+                    min={new Date().toISOString().slice(0, 10)}
+                    onChange={e => setAssignForm(d => ({ ...d, deadline: e.target.value }))}
+                    required
+                  />
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+                    This incident will be added to the employee\'s active Sprint in the <strong>To Do</strong> column.
+                  </div>
+                </div>
+
                 {/* Notes */}
                 <div className="field-group" style={{ marginBottom: '1rem' }}>
                   <label htmlFor="inc-assign-notes">Assignment Notes (optional)</label>
@@ -1087,7 +1113,7 @@ export default function IncidentManagement() {
               <button
                 className="btn-primary"
                 onClick={handleAction}
-                disabled={actionBusy || (actionModal === 'assign' && (!assignForm.userId || loadingTeams || loadingMembers))}
+                disabled={actionBusy || (actionModal === 'assign' && (!assignForm.userId || !assignForm.deadline || loadingTeams || loadingMembers))}
               >
                 {actionBusy ? (actionModal === 'assign' ? 'Assigning...' : 'Saving...') : (actionModal === 'assign' ? 'Assign Incident' : 'Save')}
               </button>

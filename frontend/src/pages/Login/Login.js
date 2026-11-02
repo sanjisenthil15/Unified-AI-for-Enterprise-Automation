@@ -1,23 +1,19 @@
 /**
  * pages/Login/Login.js
  *
- * Login page — connected to the FastAPI backend.
+ * Login & Customer Registration page — connected to the FastAPI backend.
  *
- * On submit:
- *   1. POST /api/v1/auth/login with email + password.
- *   2. Store access_token and user object in localStorage.
- *   3. Navigate to /dashboard.
- *   4. On failure, show "Invalid email or password."
- *
- * UI is unchanged — only the handleSubmit logic was updated.
+ * Supports:
+ *   1. Sign in (JWT authentication for all roles)
+ *   2. Register as Customer (creates role="customer", navigates directly to /customer-support)
  */
 
 import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { getRegistrationStatus, loginUser, getCurrentUser } from '../../api/authApi';
+import { getRegistrationStatus, loginUser, getCurrentUser, registerCustomer } from '../../api/authApi';
 import './Login.css';
 
-// Module chips shown on the brand panel (static — UI unchanged)
+// Module chips shown on the brand panel
 const MODULES = [
   '🤖 AI Recruitment',
   '🎧 Customer Support',
@@ -31,25 +27,41 @@ export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [email,    setEmail]    = useState('');
+  const [mode, setMode] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('tab') === 'customer' || params.get('register') === 'customer' ? 'register-customer' : 'login';
+  });
+
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error,    setError]    = useState('');
-  const [loading,  setLoading]  = useState(false);
-  // null while unknown; only offer sign-up when the backend says it's open.
-  const [registrationOpen, setRegistrationOpen] = useState(null);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState(
+    location.state?.registered ? 'Account created — sign in below.' : ''
+  );
+  const [loading, setLoading] = useState(false);
+  const [registrationStatus, setRegistrationStatus] = useState({ enabled: null, customerRegistrationEnabled: true });
 
   useEffect(() => {
     let active = true;
-    getRegistrationStatus().then((open) => { if (active) setRegistrationOpen(open); });
+    getRegistrationStatus().then((statusObj) => {
+      if (active) {
+        if (typeof statusObj === 'boolean') {
+          setRegistrationStatus({ enabled: statusObj, customerRegistrationEnabled: true });
+        } else {
+          setRegistrationStatus(statusObj);
+        }
+      }
+    });
     return () => { active = false; };
   }, []);
-  const justRegistered = Boolean(location.state?.registered);
 
-  async function handleSubmit(e) {
+  async function handleLogin(e) {
     e.preventDefault();
     setError('');
+    setSuccessMsg('');
 
-    // Basic client-side guard
     if (!email.trim() || !password.trim()) {
       setError('Please enter your email and password.');
       return;
@@ -57,30 +69,23 @@ export default function Login() {
 
     setLoading(true);
     try {
-      // Step 1 — Authenticate and receive JWT
       const tokenData = await loginUser(email.trim(), password);
-
-      // Step 2 — Persist token so axiosInstance can attach it
       localStorage.setItem('access_token', tokenData.access_token);
 
-      // Step 3 — Fetch full user profile and cache it
       const user = await getCurrentUser();
       localStorage.setItem('user', JSON.stringify(user));
 
-      // Step 4 — Accounts still on an HR-issued temporary password must set
-      // their own before anything else (the backend blocks other APIs too).
       const role = user?.role?.name?.toLowerCase();
       if (user?.must_change_password) {
         navigate('/change-password', { replace: true });
+      } else if (role === 'customer') {
+        navigate('/customer-support', { replace: true });
       } else if (role === 'hr_manager') {
         navigate('/hr');
       } else {
         navigate('/dashboard');
       }
     } catch (err) {
-      // Step 5 — Wrong credentials stay deliberately generic (no account
-      // enumeration); a rate-limit lock (429) or a disabled account (403)
-      // shows the server's message so the user knows to wait / ask HR.
       const status = err?.response?.status;
       const detail = err?.response?.data?.detail;
       if ((status === 429 || status === 403) && typeof detail === 'string') {
@@ -93,10 +98,81 @@ export default function Login() {
     }
   }
 
+  async function handleCustomerRegister(e) {
+    e.preventDefault();
+    setError('');
+    setSuccessMsg('');
+
+    if (!fullName.trim() || !email.trim() || !password || !confirmPassword) {
+      setError('Please fill in all required fields.');
+      return;
+    }
+
+    if (fullName.trim().length < 2) {
+      setError('Full name must be at least 2 characters.');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      return;
+    }
+
+    if (!/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
+      setError('Password must contain at least one uppercase letter and one digit.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await registerCustomer({
+        fullName: fullName.trim(),
+        email: email.trim(),
+        password,
+        confirmPassword,
+      });
+
+      // Automatically sign in the customer upon successful registration
+      try {
+        const tokenData = await loginUser(email.trim(), password);
+        localStorage.setItem('access_token', tokenData.access_token);
+        const user = await getCurrentUser();
+        localStorage.setItem('user', JSON.stringify(user));
+        navigate('/customer-support', { replace: true });
+      } catch {
+        setSuccessMsg('Customer account created successfully! Please sign in below.');
+        setMode('login');
+        setPassword('');
+        setConfirmPassword('');
+      }
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      if (typeof detail === 'string') {
+        setError(detail);
+      } else if (Array.isArray(detail) && detail.length) {
+        setError(detail.map((d) => d.msg?.replace(/^Value error, /, '') || 'Invalid input').join(' '));
+      } else {
+        setError('Could not create customer account. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="login-page">
-
-      {/* ── Left: Brand panel (UI unchanged) ───────────────────── */}
+      {/* ── Left: Brand panel ───────────────────── */}
       <div className="login-brand-panel">
         <div className="login-logo" aria-hidden="true">⚡</div>
 
@@ -118,92 +194,249 @@ export default function Login() {
         </div>
       </div>
 
-      {/* ── Right: Login form (UI unchanged) ───────────────────── */}
+      {/* ── Right: Form panel ───────────────────── */}
       <div className="login-form-panel">
-        <div className="login-form-header">
-          <h2>Welcome back</h2>
-          <p>Sign in to your enterprise account</p>
+        {/* Tab switcher: Sign In vs Register as Customer */}
+        <div className="login-tabs" role="tablist" aria-label="Authentication mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'login'}
+            className={`login-tab-btn ${mode === 'login' ? 'active' : ''}`}
+            onClick={() => { setMode('login'); setError(''); }}
+          >
+            Sign In
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'register-customer'}
+            className={`login-tab-btn ${mode === 'register-customer' ? 'active' : ''}`}
+            onClick={() => { setMode('register-customer'); setError(''); }}
+          >
+            Register as Customer
+          </button>
         </div>
 
-        <form
-          className="login-form"
-          onSubmit={handleSubmit}
-          noValidate
-          aria-label="Login form"
-        >
-          {justRegistered && !error && (
-            <div className="login-success" role="status">
-              Account created — sign in below.
-            </div>
-          )}
+        <div className="login-form-header">
+          <h2>{mode === 'login' ? 'Welcome back' : 'Register as Customer'}</h2>
+          <p>
+            {mode === 'login'
+              ? 'Sign in to your enterprise account'
+              : 'Create an account to submit and track support tickets'}
+          </p>
+        </div>
 
-          {/* Email */}
-          <div className="form-group">
-            <label htmlFor="email">Email address</label>
-            <div className="input-wrapper">
-              <span className="input-icon" aria-hidden="true">✉️</span>
-              <input
-                id="email"
-                type="email"
-                className="form-input"
-                placeholder="you@company.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
-                autoFocus
-                aria-required="true"
-                disabled={loading}
-              />
-            </div>
-          </div>
-
-          {/* Password */}
-          <div className="form-group">
-            <label htmlFor="password">Password</label>
-            <div className="input-wrapper">
-              <span className="input-icon" aria-hidden="true">🔒</span>
-              <input
-                id="password"
-                type="password"
-                className="form-input"
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                aria-required="true"
-                disabled={loading}
-              />
-            </div>
-          </div>
-
-          {/* Error message */}
-          {error && (
-            <div className="login-error" role="alert">
-              {error}
-            </div>
-          )}
-
-          {/* Submit */}
-          <button
-            type="submit"
-            className="login-btn"
-            disabled={loading}
-            aria-busy={loading}
+        {mode === 'login' ? (
+          <form
+            className="login-form"
+            onSubmit={handleLogin}
+            noValidate
+            aria-label="Login form"
           >
-            {loading ? 'Signing in…' : 'Sign In →'}
-          </button>
-        </form>
+            {successMsg && !error && (
+              <div className="login-success" role="status">
+                {successMsg}
+              </div>
+            )}
 
-        {registrationOpen === true && (
-          <p className="login-footer">
-            No account? <Link to="/register">Create one</Link>
-          </p>
+            {/* Email */}
+            <div className="form-group">
+              <label htmlFor="email">Email address</label>
+              <div className="input-wrapper">
+                <span className="input-icon" aria-hidden="true">✉️</span>
+                <input
+                  id="email"
+                  type="email"
+                  className="form-input"
+                  placeholder="you@company.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  autoFocus
+                  aria-required="true"
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            {/* Password */}
+            <div className="form-group">
+              <label htmlFor="password">Password</label>
+              <div className="input-wrapper">
+                <span className="input-icon" aria-hidden="true">🔒</span>
+                <input
+                  id="password"
+                  type="password"
+                  className="form-input"
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  aria-required="true"
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            {/* Error message */}
+            {error && (
+              <div className="login-error" role="alert">
+                {error}
+              </div>
+            )}
+
+            {/* Submit */}
+            <button
+              type="submit"
+              className="login-btn"
+              disabled={loading}
+              aria-busy={loading}
+            >
+              {loading ? 'Signing in…' : 'Sign In →'}
+            </button>
+          </form>
+        ) : (
+          <form
+            className="login-form"
+            onSubmit={handleCustomerRegister}
+            noValidate
+            aria-label="Customer registration form"
+          >
+            {/* Full Name */}
+            <div className="form-group">
+              <label htmlFor="reg-fullname">Full Name *</label>
+              <div className="input-wrapper">
+                <span className="input-icon" aria-hidden="true">👤</span>
+                <input
+                  id="reg-fullname"
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Jane Doe"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  autoFocus
+                  aria-required="true"
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            {/* Email */}
+            <div className="form-group">
+              <label htmlFor="reg-email">Email Address *</label>
+              <div className="input-wrapper">
+                <span className="input-icon" aria-hidden="true">✉️</span>
+                <input
+                  id="reg-email"
+                  type="email"
+                  className="form-input"
+                  placeholder="customer@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoComplete="email"
+                  aria-required="true"
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            {/* Password */}
+            <div className="form-group">
+              <label htmlFor="reg-password">Password *</label>
+              <div className="input-wrapper">
+                <span className="input-icon" aria-hidden="true">🔒</span>
+                <input
+                  id="reg-password"
+                  type="password"
+                  className="form-input"
+                  placeholder="8+ chars, 1 uppercase, 1 digit"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="new-password"
+                  aria-required="true"
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            {/* Confirm Password */}
+            <div className="form-group">
+              <label htmlFor="reg-confirm">Confirm Password *</label>
+              <div className="input-wrapper">
+                <span className="input-icon" aria-hidden="true">🔒</span>
+                <input
+                  id="reg-confirm"
+                  type="password"
+                  className="form-input"
+                  placeholder="Re-enter your password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  autoComplete="new-password"
+                  aria-required="true"
+                  disabled={loading}
+                />
+              </div>
+            </div>
+
+            {/* Error message */}
+            {error && (
+              <div className="login-error" role="alert">
+                {error}
+              </div>
+            )}
+
+            {/* Submit */}
+            <button
+              type="submit"
+              className="login-btn"
+              disabled={loading}
+              aria-busy={loading}
+            >
+              {loading ? 'Creating Customer Account…' : 'Register as Customer →'}
+            </button>
+          </form>
         )}
-        {registrationOpen === false && (
-          <p className="login-footer">
-            Need an account? Ask HR or an administrator to create one for you.
-          </p>
-        )}
+
+        {/* Footers */}
+        <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+          {mode === 'login' ? (
+            <>
+              <p className="login-footer" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
+                Need support?{' '}
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => { setMode('register-customer'); setError(''); }}
+                >
+                  Register as Customer
+                </button>
+              </p>
+              {registrationStatus.enabled === true && (
+                <p className="login-footer" style={{ marginTop: '0.25rem', marginBottom: '0.5rem' }}>
+                  No account? <Link to="/register">Create one</Link>
+                </p>
+              )}
+              {registrationStatus.enabled === false && (
+                <p className="login-footer" style={{ marginTop: '0.25rem', marginBottom: '0.5rem' }}>
+                  Need an account? Ask HR or an administrator to create one for you.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="login-footer" style={{ marginTop: 0, marginBottom: '0.5rem' }}>
+              Already registered?{' '}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => { setMode('login'); setError(''); }}
+              >
+                Sign In
+              </button>
+            </p>
+          )}
+        </div>
+
         <p className="login-footer">
           © {new Date().getFullYear()} Unified AI Enterprise Platform
         </p>

@@ -482,6 +482,7 @@ describe('IncidentManagement AI Triage', () => {
       team_id: 'proj_4',
       team_name: 'Customer Support Platform',
       ai_recommended_team: 'Customer Support Platform',
+      deadline: expect.any(String),
       notes: 'Primary incident handler',
     });
 

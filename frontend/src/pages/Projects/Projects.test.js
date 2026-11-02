@@ -171,3 +171,65 @@ test('status filter narrows the list', async () => {
   const names = Array.from(container.querySelectorAll('.project-card-name')).map((n) => n.textContent);
   expect(names).toEqual(['Zephyr']);
 });
+
+test('team lead is shown in leadership section but not duplicated in members list', async () => {
+  const projectWithLead = [
+    {
+      id: 3,
+      name: 'Titan',
+      description: 'Core infra',
+      status: 'active',
+      start_date: '2026-10-01',
+      deadline: '2026-12-31',
+      member_count: 2,
+      manager: { id: 50, full_name: 'Elena Rostova', email: 'elena.rostova@employee.demo' },
+      team_lead: {
+        id: 30,
+        job_title: 'Team Lead',
+        user: { id: 300, full_name: 'Vishwa G', email: 'vishwa@employee.demo' },
+      },
+      created_at: '2026-10-01T00:00:00Z',
+    },
+  ];
+
+  employeeApi.listProjects.mockResolvedValue(projectWithLead);
+  employeeApi.listProjectMembers.mockResolvedValue([
+    {
+      id: 30,
+      user_id: 300,
+      full_name: 'Vishwa G',
+      email: 'vishwa@employee.demo',
+      job_title: 'Team Lead',
+      role: 'employee',
+      team_role: 'Team Lead',
+      department_name: 'Engineering',
+      status: 'active',
+    },
+    {
+      id: 31,
+      user_id: 301,
+      full_name: 'Chloe Bennett',
+      email: 'chloe@employee.demo',
+      job_title: 'Frontend Developer',
+      role: 'employee',
+      team_role: 'Member',
+      department_name: 'Engineering',
+      status: 'active',
+    },
+  ]);
+
+  signIn('employee', 300);
+  await render();
+  await openCard('Titan');
+
+  // Vishwa G should appear in leadership card
+  expect(container.textContent).toContain('Vishwa G');
+  expect(container.textContent).toContain('Chloe Bennett');
+
+  // Verify that inside the project-members list, Vishwa G is NOT duplicated
+  const memberListItems = Array.from(container.querySelectorAll('.project-member-item'));
+  const memberNames = memberListItems.map((li) => li.querySelector('strong')?.textContent);
+  expect(memberNames).toEqual(['Chloe Bennett']);
+  expect(memberNames).not.toContain('Vishwa G');
+});
+

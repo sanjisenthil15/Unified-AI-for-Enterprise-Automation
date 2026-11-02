@@ -25,7 +25,7 @@ Timeline helper:
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Optional, Tuple, Union
 
 from fastapi import HTTPException, status
@@ -38,6 +38,8 @@ from models.department import Department
 from models.employee import Employee
 from models.incident import Incident, IncidentAITriage, IncidentTimeline
 from models.project import Project
+from models.sprint import Sprint
+from models.sprint_task import SprintTask
 from models.user import User
 from modules.incident_management.schemas import (
     AITriageResponse,
@@ -490,6 +492,7 @@ def assign_incident(
     team_id: Optional[Union[str, int]] = None,
     team_name: Optional[str] = None,
     ai_recommended_team: Optional[str] = None,
+    deadline: Optional[Union[date, str]] = None,
 ) -> IncidentResponse:
     incident = get_incident_or_404(db, incident_id)
 
@@ -565,11 +568,113 @@ def assign_incident(
     # 6. Apply assignment
     incident.assigned_to = assigned_to_user_id
 
-    # 7. Record timeline entry
+    # 7. Parse deadline and create/update Sprint Task in "To Do"
+    parsed_deadline: Optional[date] = None
+    if deadline:
+        if isinstance(deadline, str) and deadline.strip():
+            try:
+                parsed_deadline = datetime.strptime(deadline[:10], "%Y-%m-%d").date()
+            except Exception:
+                parsed_deadline = None
+        elif isinstance(deadline, date):
+            parsed_deadline = deadline
+
+    target_project_id = target_employee.project_id
+    if not target_project_id and team_id is not None:
+        team_type, num_id = _parse_team_identifier(team_id)
+        if team_type == "project":
+            target_project_id = num_id
+            target_employee.project_id = num_id
+
+    if not target_project_id:
+        active_proj = db.query(Project).filter(Project.status == "active").first()
+        if active_proj:
+            target_project_id = active_proj.id
+            target_employee.project_id = active_proj.id
+
+    sprint = None
+    sprint_task_id = None
+    if target_project_id:
+        today_date = datetime.now(timezone.utc).date()
+        sprint = db.query(Sprint).filter(
+            Sprint.project_id == target_project_id,
+            Sprint.status == "active",
+        ).first()
+
+        if not sprint:
+            planned_sprints = db.query(Sprint).filter(
+                Sprint.project_id == target_project_id,
+                Sprint.status == "planned",
+            ).order_by(Sprint.start_date.asc()).all()
+
+            for ps in planned_sprints:
+                if ps.start_date <= today_date <= ps.end_date:
+                    ps.status = "active"
+                    sprint = ps
+                    break
+            if not sprint and planned_sprints:
+                sprint = planned_sprints[0]
+                sprint.status = "active"
+
+        if not sprint:
+            end_d = parsed_deadline if (parsed_deadline and parsed_deadline >= today_date) else (today_date + timedelta(days=7))
+            sprint = Sprint(
+                project_id=target_project_id,
+                name=f"Sprint {today_date.strftime('%b %d')}",
+                start_date=today_date,
+                end_date=end_d,
+                status="active",
+                created_by=target_employee.id,
+            )
+            db.add(sprint)
+            db.flush()
+
+        # Add or update task in Sprint "To Do"
+        inc_prefix = f"[INC-{incident.id}]"
+        existing_task = db.query(SprintTask).filter(
+            SprintTask.sprint_id == sprint.id,
+            SprintTask.title.startswith(inc_prefix),
+        ).first()
+
+        task_title = f"{inc_prefix} {incident.title}"
+        if len(task_title) > 200:
+            task_title = task_title[:197] + "..."
+
+        task_desc = f"Incident #{incident.id} ({incident.severity.upper()}):\n{incident.description}"
+        if notes:
+            task_desc += f"\n\nAssignment Notes: {notes}"
+        if parsed_deadline:
+            task_desc += f"\nDeadline: {parsed_deadline.isoformat()}"
+
+        if existing_task:
+            existing_task.assignee_id = target_employee.id
+            existing_task.due_date = parsed_deadline or existing_task.due_date
+            existing_task.description = task_desc
+            existing_task.status = "todo"
+            sprint_task_id = existing_task.id
+        else:
+            new_task = SprintTask(
+                sprint_id=sprint.id,
+                assignee_id=target_employee.id,
+                title=task_title,
+                description=task_desc,
+                status="todo",
+                progress_percent=0,
+                due_date=parsed_deadline,
+            )
+            db.add(new_task)
+            db.flush()
+            sprint_task_id = new_task.id
+
+    # 8. Record timeline entry
     override_suffix = f" (Overrode AI recommendation '{ai_team}')" if is_override else ""
     tl_note = notes if notes else f"Assigned to {target_user.full_name} [{team_name}]{override_suffix}."
     if notes and is_override:
         tl_note += f" [Overrode AI recommended team: '{ai_team}']"
+    if parsed_deadline:
+        tl_note += f" [Deadline: {parsed_deadline.isoformat()}]"
+    if sprint:
+        tl_note += f" [Added to Sprint '{sprint.name}' in To Do]"
 
     _add_timeline(
         db,
@@ -579,7 +684,7 @@ def assign_incident(
         notes=tl_note,
     )
 
-    # 8. Record audit log
+    # 9. Record audit log
     action_name = "incident.assigned_override" if is_override else "incident.assigned"
     audit.label(db, incident, action_name)
     audit.record_event(
@@ -599,6 +704,9 @@ def assign_incident(
             "team_name": team_name,
             "ai_recommended_team": ai_team,
             "is_override": is_override,
+            "deadline": parsed_deadline.isoformat() if parsed_deadline else None,
+            "sprint_id": sprint.id if sprint else None,
+            "sprint_task_id": sprint_task_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
         actor=actor_user,

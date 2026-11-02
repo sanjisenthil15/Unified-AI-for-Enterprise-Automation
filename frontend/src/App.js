@@ -61,15 +61,19 @@ function mustChangePassword() {
  * dev); accounts still on an HR-issued temporary password go to the
  * mandatory /change-password screen; if allowedRoles is given, redirect
  * non-matching roles to /dashboard. The backend enforces all of these too. */
-function ProtectedRoute({ children, allowedRoles }) {
+function ProtectedRoute({ children, allowedRoles, blockCustomer = false }) {
   if (!AUTH_DISABLED && !localStorage.getItem('access_token')) {
     return <Navigate to="/login" replace />;
   }
   if (mustChangePassword()) {
     return <Navigate to="/change-password" replace />;
   }
-  if (allowedRoles && !allowedRoles.includes(currentRole())) {
-    return <Navigate to="/dashboard" replace />;
+  const role = currentRole();
+  if (role === 'customer' && blockCustomer) {
+    return <Navigate to="/customer-support" replace />;
+  }
+  if (allowedRoles && !allowedRoles.includes(role)) {
+    return <Navigate to={role === 'customer' ? '/customer-support' : '/dashboard'} replace />;
   }
   return children;
 }
@@ -93,7 +97,7 @@ export default function App() {
           <Route path="/"                 element={<CustomerSupport />} />
 
           {/* Admin / default routes */}
-          <Route path="/dashboard"        element={<Dashboard />} />
+          <Route path="/dashboard"        element={<ProtectedRoute blockCustomer><Dashboard /></ProtectedRoute>} />
           <Route
             path="/analytics"
             element={
@@ -102,13 +106,13 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/intelligence" element={<Intelligence />} />
+          <Route path="/intelligence" element={<ProtectedRoute blockCustomer><Intelligence /></ProtectedRoute>} />
           <Route path="/customer-support" element={<CustomerSupport />} />
-          <Route path="/incidents"        element={<IncidentManagement />} />
-          <Route path="/meetings"         element={<MeetingsHub />} />
-          <Route path="/meetings/offline" element={<Meetings />} />
-          <Route path="/meetings/online"  element={<OnlineMeeting />} />
-          <Route path="/meetings/scheduled" element={<ScheduledMeetings />} />
+          <Route path="/incidents"        element={<ProtectedRoute blockCustomer><IncidentManagement /></ProtectedRoute>} />
+          <Route path="/meetings"         element={<ProtectedRoute blockCustomer><MeetingsHub /></ProtectedRoute>} />
+          <Route path="/meetings/offline" element={<ProtectedRoute blockCustomer><Meetings /></ProtectedRoute>} />
+          <Route path="/meetings/online"  element={<ProtectedRoute blockCustomer><OnlineMeeting /></ProtectedRoute>} />
+          <Route path="/meetings/scheduled" element={<ProtectedRoute blockCustomer><ScheduledMeetings /></ProtectedRoute>} />
 
           {/* HR recruitment — admin/hr_manager/recruiter only; regular
               employees don't need visibility into hiring. /recruitment
@@ -143,10 +147,10 @@ export default function App() {
 
           {/* Projects — open to everyone; the backend scopes which projects
               each role sees and which lifecycle actions it may take. */}
-          <Route path="/projects" element={<Projects />} />
+          <Route path="/projects" element={<ProtectedRoute blockCustomer><Projects /></ProtectedRoute>} />
 
           {/* Leave — everyone requests; Admin / HR Manager approve (backend-enforced). */}
-          <Route path="/leave" element={<Leave />} />
+          <Route path="/leave" element={<ProtectedRoute blockCustomer><Leave /></ProtectedRoute>} />
 
           {/* Audit Log — Admin only, read-only. */}
           <Route
@@ -162,10 +166,10 @@ export default function App() {
               employee; manager-only sub-views (team attendance, sprint
               creation, team review) are gated per-request on the backend
               and simply don't render their controls client-side otherwise. */}
-          <Route path="/attendance"    element={<Attendance />} />
-          <Route path="/sprints"       element={<Sprints />} />
-          <Route path="/chat"          element={<Chat />} />
-          <Route path="/notifications" element={<Notifications />} />
+          <Route path="/attendance"    element={<ProtectedRoute blockCustomer><Attendance /></ProtectedRoute>} />
+          <Route path="/sprints"       element={<ProtectedRoute blockCustomer><Sprints /></ProtectedRoute>} />
+          <Route path="/chat"          element={<ProtectedRoute blockCustomer><Chat /></ProtectedRoute>} />
+          <Route path="/notifications" element={<ProtectedRoute blockCustomer><Notifications /></ProtectedRoute>} />
 
         </Route>
 

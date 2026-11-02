@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from auth.schemas import (
     AdminPasswordResetResponse,
     ChangePasswordRequest,
+    CustomerRegister,
     RoleResponse,
     Token,
     UserLogin,
@@ -70,7 +71,10 @@ def list_roles(db: Session = Depends(get_db)) -> list[Role]:
     description="Lets the login screen hide the sign-up link when accounts are provisioned by HR / Admin only.",
 )
 def registration_status() -> dict:
-    return {"enabled": settings.public_registration_enabled}
+    return {
+        "enabled": settings.public_registration_enabled,
+        "customer_registration_enabled": settings.customer_registration_enabled,
+    }
 
 
 # ------------------------------------------------------------------ #
@@ -153,6 +157,75 @@ def register(
     db.refresh(new_user)   # reload to populate server-side defaults (id, created_at)
 
     # Step 5 — Return safe response (Pydantic excludes hashed_password automatically)
+    return new_user
+
+
+# ------------------------------------------------------------------ #
+# POST /auth/register-customer
+# ------------------------------------------------------------------ #
+
+@router.post(
+    "/register-customer",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Register an external customer account",
+    description=(
+        "Creates a customer account with the 'customer' role strictly assigned by the backend. "
+        "Allows external clients to self-register and track customer support tickets."
+    ),
+)
+def register_customer(
+    payload: CustomerRegister,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> UserResponse:
+    if not settings.customer_registration_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Customer self-registration is currently disabled.",
+        )
+    ip = rate_limit.client_ip(request)
+    rate_limit.check_registration_allowed(db, ip)
+
+    # Step 1 — Resolve customer role
+    role: Role | None = db.query(Role).filter(Role.name == "customer").first()
+    if role is None:
+        role = Role(
+            name="customer",
+            description="External customer account for support ticket submission and tracking",
+        )
+        db.add(role)
+        db.commit()
+        db.refresh(role)
+
+    # Step 2 — Check email uniqueness
+    existing: User | None = (
+        db.query(User)
+        .filter(User.email == payload.email.lower(), User.deleted_at.is_(None))
+        .first()
+    )
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email address already exists.",
+        )
+
+    # Step 3 — Hash password
+    hashed = hash_password(payload.password)
+
+    # Step 4 — Create and persist customer user
+    new_user = User(
+        full_name=payload.full_name,
+        email=payload.email.lower(),
+        hashed_password=hashed,
+        role_id=role.id,
+        is_active=True,
+    )
+    db.add(new_user)
+    rate_limit.record_registration(db, ip)
+    db.commit()
+    db.refresh(new_user)
+
     return new_user
 
 

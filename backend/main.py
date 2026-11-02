@@ -26,13 +26,14 @@ BACKEND_DIR = Path(__file__).resolve().parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config.database import SessionLocal
 from config.settings import settings
 from core import audit
 from core.audit import AuditContextMiddleware
+from core.dependencies import deny_customer_role
 
 # ------------------------------------------------------------------ #
 # Import the models package so SQLAlchemy mappers are registered when
@@ -164,24 +165,28 @@ audit.install(SessionLocal)
 # ------------------------------------------------------------------ #
 API_PREFIX = "/api/v1"
 
+# External 'customer' accounts are confined to auth, customer support and
+# their own notifications; every internal module rejects them with 403.
+INTERNAL = [Depends(deny_customer_role)]
+
 app.include_router(auth_router,             prefix=API_PREFIX)
-app.include_router(recruitment_router,      prefix=API_PREFIX)
+app.include_router(recruitment_router,      prefix=API_PREFIX, dependencies=INTERNAL)
 app.include_router(customer_support_router, prefix=API_PREFIX)
-app.include_router(incident_router,          prefix=API_PREFIX)
-app.include_router(employee_management_router, prefix=API_PREFIX)
-app.include_router(attendance_router,       prefix=API_PREFIX)
-app.include_router(sprints_router,          prefix=API_PREFIX)
-app.include_router(chat_router,             prefix=API_PREFIX)
+app.include_router(incident_router,          prefix=API_PREFIX, dependencies=INTERNAL)
+app.include_router(employee_management_router, prefix=API_PREFIX, dependencies=INTERNAL)
+app.include_router(attendance_router,       prefix=API_PREFIX, dependencies=INTERNAL)
+app.include_router(sprints_router,          prefix=API_PREFIX, dependencies=INTERNAL)
+app.include_router(chat_router,             prefix=API_PREFIX, dependencies=INTERNAL)
 app.include_router(notifications_router,    prefix=API_PREFIX)
 # Static /meetings/online routes precede offline /meetings/{meeting_id}.
-app.include_router(online_meeting_router,   prefix=API_PREFIX)
-app.include_router(meeting_router,          prefix=API_PREFIX)
-app.include_router(analytics_router,        prefix=API_PREFIX)
-app.include_router(intelligence_router,     prefix=API_PREFIX)
-app.include_router(leave_router,            prefix=API_PREFIX)
-app.include_router(escalations_router,      prefix=API_PREFIX)
-app.include_router(audit_router,            prefix=API_PREFIX)
-app.include_router(files_router,            prefix=API_PREFIX)
+app.include_router(online_meeting_router,   prefix=API_PREFIX, dependencies=INTERNAL)
+app.include_router(meeting_router,          prefix=API_PREFIX, dependencies=INTERNAL)
+app.include_router(analytics_router,        prefix=API_PREFIX, dependencies=INTERNAL)
+app.include_router(intelligence_router,     prefix=API_PREFIX, dependencies=INTERNAL)
+app.include_router(leave_router,            prefix=API_PREFIX, dependencies=INTERNAL)
+app.include_router(escalations_router,      prefix=API_PREFIX, dependencies=INTERNAL)
+app.include_router(audit_router,            prefix=API_PREFIX, dependencies=INTERNAL)
+app.include_router(files_router,            prefix=API_PREFIX, dependencies=INTERNAL)
 
 # ------------------------------------------------------------------ #
 # Database schema is managed by Alembic, NOT by Base.metadata.create_all().

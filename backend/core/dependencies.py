@@ -18,6 +18,7 @@ How to use in a route:
 from typing import List, Optional
 
 from fastapi import Depends, HTTPException, status
+from fastapi.requests import HTTPConnection
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError
 from sqlalchemy.orm import Session
@@ -25,6 +26,7 @@ from sqlalchemy.orm import Session
 from config.database import get_db
 from config.settings import settings
 from core.audit import set_actor
+from core.permissions import ROLE_CUSTOMER
 from core.security import verify_access_token
 from models.employee import Employee
 from models.user import User
@@ -163,6 +165,37 @@ def get_current_user_allow_password_change(
     must change their temporary password through. Use ONLY on the routes
     needed to complete that change (/auth/me, /auth/change-password)."""
     return _resolve_user(credentials, db)
+
+
+def deny_customer_role(
+    connection: HTTPConnection,
+    db: Session = Depends(get_db),
+) -> None:
+    """
+    Router-level guard for internal modules: self-registered 'customer'
+    accounts may only use auth, customer support and their own
+    notifications. Requests with no or an invalid token pass through
+    untouched, so each route's own authentication (or public access)
+    still decides the outcome.
+
+    Reads the header from HTTPConnection rather than HTTPBearer so it also
+    works on WebSocket routes (HTTPBearer requires an HTTP Request).
+    """
+    if settings.AUTH_DISABLED:
+        return
+    scheme, _, token = connection.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return
+    credentials = HTTPAuthorizationCredentials(scheme=scheme, credentials=token)
+    try:
+        user = _resolve_user(credentials, db)
+    except HTTPException:
+        return
+    if user.role is not None and user.role.name == ROLE_CUSTOMER:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Customer accounts can only access customer support.",
+        )
 
 
 # ------------------------------------------------------------------ #

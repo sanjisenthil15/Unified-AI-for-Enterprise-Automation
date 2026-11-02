@@ -16,7 +16,7 @@ Schemas:
     IncidentStats           — GET  /incidents/statistics
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Literal, Optional, Union
 from pydantic import BaseModel, Field, field_validator
 
@@ -109,6 +109,7 @@ class IncidentAssign(BaseModel):
     team_name:           Optional[str]             = Field(None, description="Selected team name")
     ai_recommended_team: Optional[str]             = Field(None, description="Original AI recommended team if any")
     notes:               Optional[str]             = None
+    deadline:            Optional[Union[date, str]] = Field(None, description="Completion deadline for this incident task")
 
 
 class IncidentResolve(BaseModel):

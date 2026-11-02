@@ -20,6 +20,8 @@ from unittest.mock import MagicMock, patch
 from models.audit_log import AuditLog
 from models.employee import Employee
 from models.incident import Incident, IncidentAITriage, IncidentTimeline
+from models.sprint import Sprint
+from models.sprint_task import SprintTask
 from models.project import Project
 from models.user import User
 
@@ -123,6 +125,7 @@ def test_assign_incident_ai_recommended_team(client, new_user, db):
             "team_name": proj.name,
             "ai_recommended_team": proj.name,
             "notes": "Assigning to SRE lead per AI triage recommendation.",
+            "deadline": "2026-11-10",
         }
         r_assign = client.put(f"{INC_BASE}/{inc.id}/assign", headers=manager["headers"], json=assign_payload)
         assert r_assign.status_code == 200, r_assign.text
@@ -154,11 +157,21 @@ def test_assign_incident_ai_recommended_team(client, new_user, db):
         assert rich_row.after["assigned_to"] == dev_user["id"]
         assert rich_row.after["is_override"] is False
         assert rich_row.after["team_name"] == proj.name
+        assert rich_row.after.get("deadline") == "2026-11-10"
+
+        # Verify task created in sprint "To Do"
+        sprint_task = db.query(SprintTask).filter(SprintTask.assignee_id == emp.id).first()
+        assert sprint_task is not None
+        assert sprint_task.status == "todo"
+        assert f"[INC-{inc.id}]" in sprint_task.title
+        assert str(sprint_task.due_date) == "2026-11-10"
 
     finally:
         db.query(IncidentTimeline).filter(IncidentTimeline.incident_id == inc.id).delete()
         db.query(IncidentAITriage).filter(IncidentAITriage.incident_id == inc.id).delete()
         db.query(Incident).filter(Incident.id == inc.id).delete()
+        db.query(SprintTask).filter(SprintTask.assignee_id == emp.id).delete()
+        db.query(Sprint).filter(Sprint.project_id == proj.id).delete()
         db.delete(emp)
         db.delete(proj)
         db.commit()
@@ -251,6 +264,8 @@ def test_assign_incident_manager_team_override(client, new_user, db):
         db.query(IncidentTimeline).filter(IncidentTimeline.incident_id == inc.id).delete()
         db.query(IncidentAITriage).filter(IncidentAITriage.incident_id == inc.id).delete()
         db.query(Incident).filter(Incident.id == inc.id).delete()
+        db.query(SprintTask).filter(SprintTask.assignee_id == emp.id).delete()
+        db.query(Sprint).filter(Sprint.project_id.in_([proj_a.id, proj_b.id])).delete()
         db.delete(emp)
         db.delete(proj_a)
         db.delete(proj_b)
@@ -415,6 +430,8 @@ def test_assign_incident_missing_ai_recommendation(client, new_user, db):
     finally:
         db.query(IncidentTimeline).filter(IncidentTimeline.incident_id == inc.id).delete()
         db.query(Incident).filter(Incident.id == inc.id).delete()
+        db.query(SprintTask).filter(SprintTask.assignee_id == emp.id).delete()
+        db.query(Sprint).filter(Sprint.project_id == proj.id).delete()
         db.delete(emp)
         db.delete(proj)
         db.commit()

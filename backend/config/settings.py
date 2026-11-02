@@ -100,6 +100,16 @@ class Settings(BaseSettings):
             return self.ALLOW_PUBLIC_REGISTRATION
         return not is_hosted_environment()
 
+    # Customer self-registration (POST /auth/register-customer). Defaults to True
+    # so external customers can always register for support tickets.
+    ALLOW_CUSTOMER_REGISTRATION: Optional[bool] = None
+
+    @property
+    def customer_registration_enabled(self) -> bool:
+        if self.ALLOW_CUSTOMER_REGISTRATION is not None:
+            return self.ALLOW_CUSTOMER_REGISTRATION
+        return True
+
     # Login / registration abuse protection (database-backed, so limits hold
     # across workers and instances). Failures are counted per account+IP,
     # per account, and per IP within a sliding window; only keyed hashes of

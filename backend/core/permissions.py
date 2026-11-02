@@ -23,6 +23,7 @@ ROLE_EMPLOYEE = "employee"
 ROLE_SUPPORT_AGENT = "support_agent"
 ROLE_RECRUITER = "recruiter"
 ROLE_VIEWER = "viewer"
+ROLE_CUSTOMER = "customer"
 
 # ------------------------------------------------------------------ #
 # Roles that bypass project-level authorization checks

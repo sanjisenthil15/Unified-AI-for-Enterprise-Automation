@@ -72,6 +72,9 @@ export default function AppLayout() {
   }, [role]);
 
   const navItems = NAV_ITEMS.filter((item) => {
+    if (role === 'customer') {
+      return item.to === '/customer-support' || item.to === '/profile';
+    }
     if (!item.roles) return true;
     if (item.roles.includes(role)) return true;
     if (isTeamLead && item.roles.includes('team_lead')) return true;

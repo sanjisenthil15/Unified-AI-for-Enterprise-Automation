@@ -255,6 +255,7 @@ def assign_incident(
         team_id=payload.team_id,
         team_name=payload.team_name,
         ai_recommended_team=payload.ai_recommended_team,
+        deadline=payload.deadline,
     )
 
 

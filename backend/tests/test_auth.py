@@ -88,3 +88,67 @@ def test_users_lists_active_accounts(client, unique_email):
     assert unique_email in {u["email"] for u in r.json()}
 
     assert client.get("/api/v1/auth/users").status_code in (401, 403)
+
+def test_register_customer_assigns_customer_role(client, unique_email):
+    r = client.post("/api/v1/auth/register-customer", json={
+        "full_name": "Customer User",
+        "email": unique_email,
+        "password": "Str0ngPass1",
+        "confirm_password": "Str0ngPass1",
+    })
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["email"] == unique_email
+    assert body["role"]["name"] == "customer"
+
+
+def test_register_customer_password_mismatch(client, unique_email):
+    r = client.post("/api/v1/auth/register-customer", json={
+        "full_name": "Customer User",
+        "email": unique_email,
+        "password": "Str0ngPass1",
+        "confirm_password": "DifferentPass1",
+    })
+    assert r.status_code == 422
+
+
+def test_customer_login_and_token(client, unique_email):
+    pw = "Str0ngPass1"
+    client.post("/api/v1/auth/register-customer", json={
+        "full_name": "Customer User",
+        "email": unique_email,
+        "password": pw,
+        "confirm_password": pw,
+    })
+    r = client.post("/api/v1/auth/login", json={"email": unique_email, "password": pw})
+    assert r.status_code == 200
+    token = r.json()["access_token"]
+    me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"}).json()
+    assert me["role"]["name"] == "customer"
+
+
+def test_customer_blocked_from_internal_modules(client, unique_email):
+    pw = "Str0ngPass1"
+    client.post("/api/v1/auth/register-customer", json={
+        "full_name": "Customer User",
+        "email": unique_email,
+        "password": pw,
+        "confirm_password": pw,
+    })
+    token = client.post("/api/v1/auth/login", json={"email": unique_email, "password": pw}).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    for path in [
+        "/api/v1/incidents",
+        "/api/v1/incidents/teams",
+        "/api/v1/meetings",
+        "/api/v1/employee-management/projects",
+        "/api/v1/chat/contacts",
+        "/api/v1/meetings/online/mine",
+    ]:
+        assert client.get(path, headers=headers).status_code == 403, path
+
+    # Customer support and the customer's own notifications stay reachable.
+    assert client.get("/api/v1/customer-support/tickets", headers=headers).status_code == 200
+    assert client.get("/api/v1/notifications/unread-count", headers=headers).status_code == 200
+

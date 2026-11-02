@@ -78,9 +78,12 @@ export async function listUsers() {
 export async function getRegistrationStatus() {
   try {
     const response = await axiosInstance.get('/api/v1/auth/registration-status');
-    return Boolean(response.data?.enabled);
+    return {
+      enabled: Boolean(response.data?.enabled),
+      customerRegistrationEnabled: response.data?.customer_registration_enabled !== false,
+    };
   } catch {
-    return false;
+    return { enabled: false, customerRegistrationEnabled: true };
   }
 }
 
@@ -89,6 +92,16 @@ export async function registerUser({ fullName, email, password }) {
     full_name: fullName,
     email,
     password,
+  });
+  return response.data;
+}
+
+export async function registerCustomer({ fullName, email, password, confirmPassword }) {
+  const response = await axiosInstance.post('/api/v1/auth/register-customer', {
+    full_name: fullName,
+    email,
+    password,
+    confirm_password: confirmPassword,
   });
   return response.data;
 }

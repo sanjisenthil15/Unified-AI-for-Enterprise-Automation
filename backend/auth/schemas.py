@@ -56,6 +56,48 @@ class UserRegister(BaseModel):
         return validate_password_policy(v)
 
 
+class CustomerRegister(BaseModel):
+    """
+    Payload for POST /auth/register-customer.
+    Constraints enforced before database touch.
+    Role 'customer' is strictly assigned on backend.
+    """
+    full_name: str = Field(
+        ...,
+        min_length=2,
+        max_length=120,
+        examples=["Jane Doe"],
+        description="Customer display name (2–120 characters)",
+    )
+    email: EmailStr = Field(
+        ...,
+        examples=["customer@example.com"],
+        description="Unique customer email address used to log in",
+    )
+    password: str = Field(
+        ...,
+        examples=["Str0ng!Pass"],
+        description="Plain-text password adhering to enterprise password policy",
+    )
+    confirm_password: str = Field(
+        ...,
+        min_length=1,
+        examples=["Str0ng!Pass"],
+        description="Confirmation matching password",
+    )
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        return validate_password_policy(v)
+
+    @model_validator(mode="after")
+    def passwords_match(self):
+        if self.password != self.confirm_password:
+            raise ValueError("Password and confirmation do not match.")
+        return self
+
+
 class UserLogin(BaseModel):
     """
     Payload for POST /auth/login.

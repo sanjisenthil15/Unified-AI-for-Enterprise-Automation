@@ -653,26 +653,49 @@ export default function Projects() {
                 ) : projectMembers.length === 0 ? (
                   <p className="muted-note">No employees are currently staffed on this project.</p>
                 ) : (
-                  <ul className="project-members" aria-label="Project team members">
-                    {projectMembers.map((emp) => (
-                      <li key={emp.id} className="project-member-item">
-                        <Avatar name={emp.full_name} email={emp.email} size={36} />
-                        <div className="project-member-text">
-                          <div className="project-member-name-row">
-                            <strong>{emp.full_name}</strong>
-                            <span className={`badge ${emp.team_role === 'Team Lead' ? 'green' : 'gray'}`}>
-                              {emp.team_role}
-                            </span>
-                          </div>
-                          <span className="member-designation">
-                            {emp.job_title}
-                            {emp.department_name ? ` • ${emp.department_name}` : ''}
-                          </span>
-                          <span className="member-email">{emp.email}</span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+                  (() => {
+                    const displayMembers = projectMembers.filter((emp) => {
+                      if (
+                        selected.team_lead &&
+                        (emp.id === selected.team_lead.id ||
+                          emp.user_id === selected.team_lead.user?.id ||
+                          emp.team_role === 'Team Lead')
+                      ) {
+                        return false;
+                      }
+                      if (selected.manager && emp.user_id === selected.manager.id) {
+                        return false;
+                      }
+                      return true;
+                    });
+
+                    if (displayMembers.length === 0) {
+                      return <p className="muted-note">No additional team members staffed on this project.</p>;
+                    }
+
+                    return (
+                      <ul className="project-members" aria-label="Project team members">
+                        {displayMembers.map((emp) => (
+                          <li key={emp.id} className="project-member-item">
+                            <Avatar name={emp.full_name} email={emp.email} size={36} />
+                            <div className="project-member-text">
+                              <div className="project-member-name-row">
+                                <strong>{emp.full_name}</strong>
+                                <span className={`badge ${emp.team_role === 'Team Lead' ? 'green' : 'gray'}`}>
+                                  {emp.team_role}
+                                </span>
+                              </div>
+                              <span className="member-designation">
+                                {emp.job_title}
+                                {emp.department_name ? ` • ${emp.department_name}` : ''}
+                              </span>
+                              <span className="member-email">{emp.email}</span>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    );
+                  })()
                 )}
 
                 <div className="project-members-footer muted-note">
